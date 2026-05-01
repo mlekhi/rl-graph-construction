@@ -1,0 +1,48 @@
+{
+  "embedding_model": "bert-base-uncased",
+  "max_len": 128,
+  "pooling": "mean",
+  "pca_dim": 128,
+  "pca_whiten": false,
+  "feature_scaling": "zscore",
+  "balance_scope": "train",
+  "balance_method": "smote",
+  "test_size": 0.2,
+  "val_size": 0.2,
+  "labels": [
+    "negative",
+    "neutral",
+    "positive"
+  ],
+  "shapes": {
+    "X_train_bal": [
+      24087,
+      128
+    ],
+    "X_val": [
+      4963,
+      128
+    ],
+    "X_test": [
+      6203,
+      128
+    ]
+  },
+  "label_counts": {
+    "train_after_balancing": {
+      "negative": 8029,
+      "neutral": 8029,
+      "positive": 8029
+    },
+    "val": {
+      "negative": 1405,
+      "neutral": 2008,
+      "positive": 1550
+    },
+    "test": {
+      "negative": 1756,
+      "neutral": 2510,
+      "positive": 1937
+    }
+  }
+}

@@ -1,0 +1,17 @@
+# large binary artifacts
+cache/
+preprocessed/*.npy
+runs/*/model_outputs/
+
+# raw data (not committed per handover)
+data/
+
+# system
+.DS_Store
+.claude/
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+.env
