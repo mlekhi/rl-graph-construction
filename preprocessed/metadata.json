@@ -9,6 +9,7 @@
   "balance_method": "smote",
   "test_size": 0.2,
   "val_size": 0.2,
+  "policy_val_split": 0.5,
   "labels": [
     "negative",
     "neutral",
@@ -19,8 +20,12 @@
       24087,
       128
     ],
-    "X_val": [
-      4963,
+    "X_sage_val": [
+      2481,
+      128
+    ],
+    "X_policy_val": [
+      2482,
       128
     ],
     "X_test": [
@@ -34,10 +39,15 @@
       "neutral": 8029,
       "positive": 8029
     },
-    "val": {
-      "negative": 1405,
-      "neutral": 2008,
-      "positive": 1550
+    "sage_val": {
+      "negative": 702,
+      "neutral": 1004,
+      "positive": 775
+    },
+    "policy_val": {
+      "negative": 703,
+      "neutral": 1004,
+      "positive": 775
     },
     "test": {
       "negative": 1756,
