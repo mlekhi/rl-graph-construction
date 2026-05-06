@@ -27,3 +27,29 @@
   - `01_preprocessing.ipynb`: add `POLICY_VAL_SIZE` knob, produce `X_policy_val.npy` + `y_policy_val.npy`
   - `02_graphsage.ipynb`: add `policy_val_mask`, extend graph builder for policy_val nodes, re-tune SAGE under new split
 - **note:** new baseline numbers will differ slightly from fadi's 0.6823 due to smaller sage_val (10% vs 20%) — must re-report before writing RL code
+
+---
+
+## 2026-05-06
+
+### environment setup
+- notebook was pinned to fadi's kernel `sentiment-rl-graph` (didn't exist locally)
+- registered new kernel: `python3.11 -m ipykernel install --user --name sentiment-rl-graph`
+- installed missing deps on python3.11: scikit-learn, imbalanced-learn, torch-geometric, optuna, seaborn, matplotlib
+
+### 01_preprocessing.ipynb — 4-way split complete
+- edited notebook to produce 4-way split: train / sage_val / policy_val / test
+- `POLICY_VAL_SIZE = 0.5` (splits existing val 50/50 into sage_val + policy_val)
+- new split sizes: train=24,087 (balanced) | sage_val=2,481 | policy_val=2,482 | test=6,203
+- new files: `preprocessed/X_sage_val.npy`, `preprocessed/X_policy_val.npy`, `preprocessed/y_sage_val.npy`, `preprocessed/y_policy_val.npy`
+- new data splits: `data_splits/sage_val.csv`, `data_splits/policy_val.csv`
+- set `REGENERATE_SPLITS = False` after first run
+
+### 02_graphsage.ipynb — re-run under new split (in progress)
+- notebook uses cached best params from fadi's run (optuna re-tune skipped for now — acceptable for baseline replication)
+- **new baseline numbers (4-way split, 10 seeds):**
+  - sage_val accuracy: **0.6995 ± 0.0014**
+  - test accuracy: **0.6819 ± 0.0025**
+  - test acc drop from 0.6823 → 0.6819 is within CI — baseline is stable
+- k-sweep running (K=5,10,15,20,30,50,100) — results pending
+- note: SAGE params not re-tuned on new split yet — should do a proper optuna run before finalizing RL baseline
