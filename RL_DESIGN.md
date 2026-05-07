@@ -1,8 +1,8 @@
-# RL graph construction — design doc
+# RL graph construction - design doc
 
 ## problem framing
 
-replace the static kNN graph construction step with an RL agent that learns which edges to keep from a kNN-50 candidate pool. the frozen graphsage classifier is the "environment" — the agent acts on the graph, sage scores it, agent gets rewarded.
+replace the static kNN graph construction step with an RL agent that learns which edges to keep from a kNN-50 candidate pool. the frozen graphsage classifier is the "environment" - the agent acts on the graph, sage scores it, agent gets rewarded.
 
 ---
 
@@ -41,7 +41,7 @@ for each node `i`, the agent outputs a binary keep/prune decision over its 50 ca
 a_i ∈ {0, 1}^50   (keep=1, prune=0)
 ```
 
-total action space: n_train × 50 binary decisions per episode. this is large — we handle it by:
+total action space: n_train × 50 binary decisions per episode. this is large - we handle it by:
 - treating each node's 50 decisions independently (factorized policy)
 - policy net outputs 50 logits per node → sigmoid → bernoulli sample
 
@@ -60,7 +60,7 @@ input: node features x (n × 128)
 → sigmoid → keep probability p_ij for each candidate j
 ```
 
-the policy is itself a 2-layer graphsage. small on purpose — we want it fast.
+the policy is itself a 2-layer graphsage. small on purpose - we want it fast.
 
 ### 5. reward
 
@@ -112,10 +112,10 @@ episode length: 1 "step" (all decisions made simultaneously). this is a bandit-s
 | question | decision |
 |---|---|
 | construction once per run or per sample? | once per episode (full graph, ~35k nodes) |
-| freeze sage during RL? | yes — always frozen |
+| freeze sage during RL? | yes - always frozen |
 | episode length? | 1 step (bandit) |
 | reward signal? | sparse delta macro-F1 on policy_val |
-| SMOTE synthetic nodes in candidate pool? | include — filter later if signal is noisy |
+| SMOTE synthetic nodes in candidate pool? | include - filter later if signal is noisy |
 
 ---
 
@@ -127,15 +127,15 @@ episode length: 1 "step" (all decisions made simultaneously). this is a bandit-s
 | hard (k-sweep peak) | test acc ~0.685 (K=50, new split pending) | proves RL > best fixed-K |
 | stretch (MLP) | test F1 0.689 | proves graph adds value at all |
 
-neutral class recall is the leading indicator — if it doesn't move, headline number won't either.
+neutral class recall is the leading indicator - if it doesn't move, headline number won't either.
 
 ---
 
 ## implementation order
 
-1. `GraphEnv` class — wraps frozen sage + policy_val evaluation
-2. `PolicyNet` class — 2-layer sage + per-candidate MLP head  
-3. REINFORCE training loop — ~100 episodes smoke test on subset
-4. logging — wandb: per-episode reward, val F1, action histograms, policy gradient norms
+1. `GraphEnv` class - wraps frozen sage + policy_val evaluation
+2. `PolicyNet` class - 2-layer sage + per-candidate MLP head  
+3. REINFORCE training loop - ~100 episodes smoke test on subset
+4. logging - wandb: per-episode reward, val F1, action histograms, policy gradient norms
 5. scale to full graph
 6. evaluate vs baseline with 10-seed CI
