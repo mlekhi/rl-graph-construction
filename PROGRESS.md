@@ -53,3 +53,52 @@
   - test acc drop from 0.6823 → 0.6819 is within CI — baseline is stable
 - k-sweep running (K=5,10,15,20,30,50,100) — results pending
 - note: SAGE params not re-tuned on new split yet — should do a proper optuna run before finalizing RL baseline
+
+---
+
+## 2026-05-07
+
+### 02_graphsage k-sweep — completed
+- k-sweep finished for all 7 K values (5, 10, 15, 20, 30, 50, 100) under the new 4-way split
+- results pending commit once script writes final CSVs
+- run was slow due to mac lid-close pausing the process (caffeinate not wrapping the python script run)
+- lesson learned: always wrap long runs with `caffeinate -s` from the start
+
+### wandb setup
+- installed wandb 0.26.1 on python3.11
+- logged in to account: mlekhi-western-university
+- project name: `rl-graph-construction`
+- not yet wired into training loop — to do next session
+
+### RL design doc (`RL_DESIGN.md`)
+- wrote policy sketch covering all open design questions from fadi's plan
+- key decisions made (with assumptions noted):
+
+| decision | choice | assumption |
+|---|---|---|
+| episode structure | bandit (1 step, all edges at once) | sequential per-edge would be intractable |
+| construction frequency | once per episode (full graph) | per-sample too slow on 35k nodes |
+| candidate pool | kNN-50 | inherits from k-sweep peak |
+| state | node features + neighbor mean + sage logits + degree | sage confidence is informative signal |
+| action | binary keep/prune per candidate, factorized | independent per-node decisions are reasonable |
+| reward | sparse delta macro-F1 on policy_val | dense reward too noisy on 2.5k val nodes |
+| policy net | 2-layer graphsage + MLP head | could be overkill — MLP on node pairs may suffice |
+| algorithm | REINFORCE → PPO if unstable | standard starting point |
+
+- biggest open assumption: policy net architecture (graphsage vs simpler MLP)
+- **fadi should review design doc before any code is written**
+
+### week 1 retrospective
+completed:
+- [x] env setup + kernel registration
+- [x] baseline reproduced (within ±0.005 of 0.6823)
+- [x] 4-way split refactor (ahead of schedule — was week 2 in fadi's plan)
+- [x] new baseline numbers under 4-way split
+- [x] k-sweep under new split
+- [x] policy sketch (RL_DESIGN.md)
+- [x] wandb installed + logged in
+
+not done from fadi's checklist:
+- [ ] read must-read papers (graphsage, lds-gnn, idgl, neuralsparse)
+- [ ] wandb wired into training loop
+- [ ] toy PPO smoke test on small graph
