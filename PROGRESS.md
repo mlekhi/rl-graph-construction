@@ -102,3 +102,46 @@ not done from fadi's checklist:
 - [ ] read must-read papers (graphsage, lds-gnn, idgl, neuralsparse)
 - [ ] wandb wired into training loop
 - [ ] toy PPO smoke test on small graph
+
+---
+
+## 2026-05-08
+
+### graphrare paper read (2312.09708v2)
+
+fadi identified this as closest competing work. full paper read (14 pages).
+
+**what they do:**
+- target: heterophilic graphs where same-label nodes are multi-hop away
+- node relative entropy = feature entropy + structural entropy, weights structural by lambda (default 1.0)
+- DRL agent: per node, selects k nodes to add and d nodes to remove from ranked candidate set
+- co-trains GNN + DRL jointly (not frozen backbone)
+- PPO with MLP policy (not a GNN policy)
+- reward: delta accuracy + lambda * delta loss on training set (dense, every episode)
+- tested on 7 datasets: 5 heterophilic + cora/pubmed
+
+**key results:**
+- graphsage-RARE beats vanilla graphsage by 7.81% average accuracy across 7 datasets
+- gains largest on heterophilic datasets, smaller on cora/pubmed (homophilic)
+- convergence: DRL reward noisy for first ~15 episodes then stabilizes (fig 6c)
+- runtime: ~3x slower than baseline, but entropy computed once before training
+
+**ablation findings:**
+- both adding AND removing edges matter -- doing only one is suboptimal
+- relative entropy prior is critical -- random shuffling of candidates hurts significantly
+- reward function matters (AUC vs accuracy produces different results)
+- DRL module clearly helps vs fixed-k baseline
+
+**how we differ:**
+- frozen SAGE vs co-training: avoids reward hacking, but GNN can't adapt to optimized graph
+- moderate homophily (~0.51) vs purely heterophilic target -- we're closer to their cora regime
+- tweet/NLP domain vs citation/social networks
+- no relative entropy prior (pure RL exploration) -- could add this as a feature later
+- our reward: delta macro-F1 on policy_val (held-out split) vs their training-set reward
+- policy architecture TBD (fadi wants to revisit after reading this paper)
+
+**implications for RL_DESIGN.md:**
+- fadi's push for dense reward is validated by graphrare results
+- per-node add+remove (not just prune) should be in our action space
+- MLP policy may be sufficient -- graphrare didn't need a GNN policy
+- 50-100 edits per episode (fadi's revision) aligns with graphrare's sequential approach
