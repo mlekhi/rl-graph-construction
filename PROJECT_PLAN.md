@@ -1,5 +1,7 @@
 # project plan -- rl graph construction
-_updated: 2026-05-12. target submission: aug 15, 2026._
+_updated: 2026-05-12._
+_conference submission: MIT URTC (https://urtc.mit.edu/) -- deadline aug 3, 2026._
+_thesis submission: aug 15, 2026._
 
 ---
 
@@ -58,14 +60,21 @@ _updated: 2026-05-12. target submission: aug 15, 2026._
 - [ ] results chapter: baseline table, RL results, ablations
 - no new experiments during this block
 
-### weeks 13-14 (jul 22 - aug 5) -- writing block 2 + fadi review
+### week 13 (jul 22-28) -- writing block 2 + fadi review
 - [ ] intro + conclusion
 - [ ] figures and tables finalized
-- [ ] full draft to fadi by jul 28 for review pass
+- [ ] **full draft to fadi by jul 25 for review pass**
 
-### aug 6-15 -- revisions + submission
+### jul 29 - aug 2 -- revisions
 - [ ] revisions from fadi feedback
-- [ ] submission
+- [ ] final proofread
+
+### aug 3 -- MIT URTC submission deadline
+- [ ] submit to MIT URTC (https://urtc.mit.edu/)
+
+### aug 6-15 -- thesis submission
+- [ ] any remaining revisions
+- [ ] thesis submission
 
 ---
 
