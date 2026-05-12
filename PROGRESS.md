@@ -145,3 +145,42 @@ fadi identified this as closest competing work. full paper read (14 pages).
 - per-node add+remove (not just prune) should be in our action space
 - MLP policy may be sufficient -- graphrare didn't need a GNN policy
 - 50-100 edits per episode (fadi's revision) aligns with graphrare's sequential approach
+
+---
+
+## 2026-05-12
+
+### dataset pivot: cora + pubmed (fadi's instruction)
+
+fadi confirmed switch away from the sentiment dataset. reason: MLP is already competitive with graphsage on sentiment (MLP F1 ~0.689 vs graphsage ~0.6856), leaving no headroom to demonstrate RL graph construction adds value. on cora/pubmed the GNN-vs-MLP gap is 5-8pp, making the contribution demonstrable on well-cited benchmarks.
+
+**new primary datasets:**
+- cora (primary)
+- pubmed (primary)
+- citeseer (possible third, for breadth)
+
+**what's deprecated:**
+- sentiment pipeline (bert embeddings, smote, pca, custom knn graph)
+- verify_k100.py (no longer needed)
+- optuna re-tune on sentiment split
+- 01_preprocessing.ipynb / 02_graphsage.ipynb as primary notebooks
+
+**what carries over:**
+- multi-seed CI methodology (exactly same)
+- sage_val / policy_val split pattern (apply to planetoid splits)
+- wandb setup (already installed/logged in)
+- graphsage training code (adapt for planetoid)
+- RL design (dataset-agnostic, still valid)
+
+**new approach:**
+- load via PyG Planetoid loader
+- follow graphrare split: 60/20/20 per class, 10 random splits
+- add policy_val by splitting val 50/50 into sage_val + policy_val
+- establish graphsage + MLP baselines on cora and pubmed
+- use original citation graph edges (not knn from features) as RL candidate pool
+
+**next steps:**
+- [ ] write `03_baseline_planetoid.py` -- graphsage + MLP baselines on cora/pubmed
+- [ ] optuna tune graphsage on cora
+- [ ] update RL_DESIGN.md for new dataset context
+- [ ] reply to fadi confirming dataset switch
