@@ -179,8 +179,31 @@ fadi confirmed switch away from the sentiment dataset. reason: MLP is already co
 - establish graphsage + MLP baselines on cora and pubmed
 - use original citation graph edges (not knn from features) as RL candidate pool
 
+**completed today:**
+- [x] wrote `03_baseline_planetoid.py` -- graphsage + MLP baselines, graphrare-style splits
+- [x] set up gpu2.gaul.csd.uwo.ca (4x GTX 1060 6GB, miniconda, pytorch+pyg)
+- [x] ran cora baseline (10 splits, optuna 50 trials)
+- [x] ran pubmed baseline (10 splits, optuna 50 trials)
+- [x] updated RL_DESIGN.md for new dataset context + fadi's revisions
+
+### baseline results (cora + pubmed, 10 splits, 60/10/10/20 per-class split)
+
+| dataset | model | test acc | test f1 |
+|---|---|---|---|
+| cora | graphsage | 0.879 ± 0.013 | 0.866 ± 0.015 |
+| cora | MLP | 0.757 ± 0.012 | 0.732 ± 0.016 |
+| pubmed | graphsage | 0.886 ± 0.003 | 0.884 ± 0.003 |
+| pubmed | MLP | 0.876 ± 0.003 | 0.874 ± 0.004 |
+
+**cora gap: ~12pp** -- strong signal that graph structure matters, RL has clear headroom.
+**pubmed gap: ~1pp** -- small gap, consistent with graphrare's findings on pubmed. may be less compelling for the thesis contribution. worth flagging to fadi.
+
+RL targets to beat:
+- cora: graphsage 0.879, graphrare reported graphsage-RARE at ~0.890 (our stretch)
+- pubmed: graphsage 0.886, gap to MLP is narrow so contribution story is harder here
+
 **next steps:**
-- [ ] write `03_baseline_planetoid.py` -- graphsage + MLP baselines on cora/pubmed
-- [ ] optuna tune graphsage on cora
-- [ ] update RL_DESIGN.md for new dataset context
-- [ ] reply to fadi confirming dataset switch
+- [ ] scp results from gpu2 back to mac and commit
+- [ ] write project plan with weekly milestones through aug 15
+- [ ] reply to fadi with baseline results + updated design doc + project plan
+- [ ] start GraphEnv class (RL environment wrapper)
