@@ -358,6 +358,35 @@ class GraphEnv:
     def edge_state_dim(self):
         return 2 * self.state_dim + 3
 
+    def get_node_candidates(self, node_i):
+        """
+        Returns candidates for a single node: add from kNN pool + remove from current edges.
+        ~10-25 candidates per node -- tractable for policy evaluation.
+        """
+        ei  = self.current_edge_index.cpu().numpy()
+        deg = int((ei[0] == node_i).sum())
+
+        candidates = []
+        # add: from kNN pool
+        for j in self.knn_pool[node_i]:
+            candidates.append((node_i, j, "add"))
+        # remove: current edges (only if degree > min_degree)
+        if deg > self.min_degree:
+            nbrs = ei[1][ei[0] == node_i].tolist()
+            for j in nbrs:
+                candidates.append((node_i, j, "remove"))
+        return candidates
+
+    def sample_node_by_entropy(self):
+        """
+        Sample a node weighted by structural entropy -- high entropy nodes
+        are most uncertain and most worth editing.
+        """
+        entropy = self.struct_entropy.cpu().numpy()
+        entropy = entropy + 1e-6  # avoid all-zero
+        probs   = entropy / entropy.sum()
+        return int(np.random.choice(self.num_nodes, p=probs))
+
     def _get_all_candidates(self):
         """
         Returns list of (node_i, node_j, op) candidate actions.

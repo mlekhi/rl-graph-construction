@@ -168,16 +168,20 @@ print(f"\nbaseline: macro_f1={env.baseline_macro_f1:.4f}  minority_f1={env.basel
 
 for episode in range(1, args.n_episodes + 1):
     buffer.clear()
-    node_states, candidates = env.reset()
+    node_states, _ = env.reset()
 
     ep_reward = 0.0
     ep_valid  = 0
 
     for step in range(args.max_steps):
-        if not candidates:
-            break
+        # node-first: pick node by entropy weight, evaluate its candidates only
+        node_i     = env.sample_node_by_entropy()
+        candidates = env.get_node_candidates(node_i)
 
-        # build edge states for all candidates in one vectorized op
+        if not candidates:
+            continue
+
+        # build edge states for this node's candidates (~10-25 candidates)
         all_states = env.get_edge_states_batch(candidates)  # (N_cands, edge_state_dim)
 
         # sample action
@@ -187,16 +191,13 @@ for episode in range(1, args.n_episodes + 1):
             action_idx  = dist.sample()
             log_prob    = dist.log_prob(action_idx)
 
-        action = candidates[action_idx.item()]
+        action       = candidates[action_idx.item()]
         chosen_state = all_states[action_idx]
 
         # step env
         node_states, reward, done, info = env.step(action)
         ep_reward += reward
         ep_valid  += int(info["valid_action"])
-
-        # refresh candidates
-        candidates = env._get_all_candidates()
 
         buffer.add(
             edge_state=chosen_state.cpu(),
