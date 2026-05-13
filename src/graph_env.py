@@ -311,6 +311,32 @@ class GraphEnv:
     def state_dim(self):
         return self.hidden_dim + self.num_classes + 3
 
+    def get_edge_states_batch(self, candidates):
+        """
+        Vectorized edge state computation for a list of (node_i, node_j, op) tuples.
+        Returns (N, edge_state_dim) tensor. Much faster than calling get_edge_state in a loop.
+        """
+        if not candidates:
+            return torch.zeros(0, self.edge_state_dim, device=self.device)
+
+        node_states = self._get_node_states()  # (n_nodes, state_dim)
+        h_norm = F.normalize(self.cached_embeddings, dim=1)  # (n_nodes, hidden_dim)
+
+        idx_i  = torch.tensor([c[0] for c in candidates], dtype=torch.long, device=self.device)
+        idx_j  = torch.tensor([c[1] for c in candidates], dtype=torch.long, device=self.device)
+        ops    = torch.tensor([1.0 if c[2] == "add" else 0.0 for c in candidates],
+                              device=self.device).unsqueeze(1)
+
+        s_i      = node_states[idx_i]                          # (N, state_dim)
+        s_j      = node_states[idx_j]                          # (N, state_dim)
+        cos_sim  = (h_norm[idx_i] * h_norm[idx_j]).sum(dim=1, keepdim=True)  # (N, 1)
+        in_orig  = torch.tensor(
+            [float(frozenset([c[0], c[1]]) in self.original_edges_set) for c in candidates],
+            device=self.device
+        ).unsqueeze(1)                                          # (N, 1)
+
+        return torch.cat([s_i, s_j, cos_sim, in_orig, ops], dim=1)  # (N, edge_state_dim)
+
     def get_edge_state(self, node_i, node_j, op):
         """
         Edge-level state for policy input:

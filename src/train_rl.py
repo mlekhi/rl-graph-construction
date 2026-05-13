@@ -44,7 +44,6 @@ parser.add_argument("--entropy_coef", type=float, default=0.01)
 parser.add_argument("--n_policy_epochs",  type=int, default=4,  help="PPG policy phase epochs")
 parser.add_argument("--n_aux_epochs",     type=int, default=6,  help="PPG auxiliary phase epochs")
 parser.add_argument("--aux_every",        type=int, default=32, help="run aux phase every N episodes")
-parser.add_argument("--n_candidates",  type=int, default=256, help="candidates sampled per step")
 parser.add_argument("--smoke_test",   action="store_true", help="run 20 episodes only")
 parser.add_argument("--seed",         type=int, default=42)
 parser.add_argument("--wandb",        action="store_true")
@@ -178,17 +177,8 @@ for episode in range(1, args.n_episodes + 1):
         if not candidates:
             break
 
-        # sample subset of candidates to keep step cost manageable
-        if len(candidates) > args.n_candidates:
-            sampled = random.sample(candidates, args.n_candidates)
-        else:
-            sampled = candidates
-
-        # build edge state tensor for sampled candidates
-        all_states = torch.stack([
-            env.get_edge_state(i, j, op)
-            for (i, j, op) in sampled
-        ]).to(device)  # (N_sampled, edge_state_dim)
+        # build edge states for all candidates in one vectorized op
+        all_states = env.get_edge_states_batch(candidates)  # (N_cands, edge_state_dim)
 
         # sample action
         policy.eval()
@@ -197,7 +187,7 @@ for episode in range(1, args.n_episodes + 1):
             action_idx  = dist.sample()
             log_prob    = dist.log_prob(action_idx)
 
-        action = sampled[action_idx.item()]
+        action = candidates[action_idx.item()]
         chosen_state = all_states[action_idx]
 
         # step env
