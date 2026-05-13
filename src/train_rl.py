@@ -222,7 +222,7 @@ for episode in range(1, args.n_episodes + 1):
 
     # ---- PPG policy phase ----
     returns = buffer.compute_returns()
-    advantages = returns - torch.stack(buffer.values).squeeze()
+    advantages = returns - torch.stack(buffer.values).squeeze().to(device)
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     policy.train()
