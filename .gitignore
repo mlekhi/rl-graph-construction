@@ -2,6 +2,7 @@
 cache/
 preprocessed/*.npy
 runs/*/model_outputs/
+runs/**/*.pt
 
 # raw data (not committed per handover)
 data/
