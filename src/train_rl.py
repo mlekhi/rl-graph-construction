@@ -122,28 +122,24 @@ print(f"policy params: {sum(p.numel() for p in policy.parameters()):,}")
 # rollout buffer
 # ============================================================
 class RolloutBuffer:
-    """Stores one episode of experience."""
+    """Stores one episode of experience. Only stores chosen edge state per step."""
     def __init__(self):
-        self.edge_states   = []  # edge state for chosen action
-        self.action_idxs   = []  # index into candidate list
+        self.chosen_states = []  # edge state of chosen action (1 per step)
         self.log_probs_old = []  # log prob under old policy
         self.rewards       = []  # reward at each step
         self.values        = []  # critic value at each step
-        self.all_edge_states = [] # full candidate states per step (for aux phase)
 
     def clear(self):
         self.__init__()
 
-    def add(self, edge_state, action_idx, log_prob, reward, value, all_states):
-        self.edge_states.append(edge_state)
-        self.action_idxs.append(action_idx)
+    def add(self, chosen_state, log_prob, reward, value):
+        self.chosen_states.append(chosen_state)
         self.log_probs_old.append(log_prob)
         self.rewards.append(reward)
         self.values.append(value)
-        self.all_edge_states.append(all_states)
 
     def compute_returns(self, gamma=0.99):
-        """Discounted returns (simple, no GAE for now)."""
+        """Discounted returns."""
         returns = []
         R = 0.0
         for r in reversed(self.rewards):
@@ -200,97 +196,68 @@ for episode in range(1, args.n_episodes + 1):
         ep_valid  += int(info["valid_action"])
 
         buffer.add(
-            edge_state=chosen_state.cpu(),
-            action_idx=torch.tensor(0),  # after selection, action is always idx 0 of chosen
+            chosen_state=chosen_state.cpu(),
             log_prob=log_prob.cpu(),
             reward=reward,
             value=value.cpu(),
-            all_states=all_states.cpu(),
         )
 
         if done:
             break
 
     # ---- PPG policy phase ----
-    returns = buffer.compute_returns()
-    advantages = returns - torch.stack(buffer.values).squeeze().to(device)
+    returns    = buffer.compute_returns()
+    chosen_t   = torch.stack(buffer.chosen_states).to(device)  # (T, edge_state_dim)
+    old_lp_t   = torch.stack(buffer.log_probs_old).to(device)  # (T,)
+    values_t   = torch.stack(buffer.values).squeeze().to(device)  # (T,)
+
+    advantages = returns - values_t
     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     policy.train()
     for _ in range(args.n_policy_epochs):
-        # recompute log probs for taken actions
-        new_log_probs, entropies, new_values = [], [], []
-        for i, all_states in enumerate(buffer.all_edge_states):
-            all_states = all_states.to(device)
-            logits, val = policy(all_states)
-            dist = torch.distributions.Categorical(logits=logits)
-            # action was the first element (we took action_idx from dist)
-            # recover original action index -- store it properly
-            log_p = buffer.log_probs_old[i].to(device)  # use stored for now
-            new_log_probs.append(log_p)
-            entropies.append(dist.entropy().mean())
-            new_values.append(val)
+        logits, new_values = policy(chosen_t)
+        # treat each chosen state as a single-candidate set -> log_prob = log_sigmoid(logit)
+        new_lp = F.logsigmoid(logits.squeeze())
+        entropy = torch.distributions.Bernoulli(logits=logits.squeeze()).entropy().mean()
 
-        new_log_probs = torch.stack(new_log_probs)
-        old_log_probs = torch.stack(buffer.log_probs_old).to(device)
-        entropies     = torch.stack(entropies)
-        new_values    = torch.stack(new_values)
-
-        ratio = (new_log_probs - old_log_probs).exp()
-        adv   = advantages.to(device)
-
-        # clipped policy loss
+        ratio     = (new_lp - old_lp_t).exp()
         loss_clip = -torch.min(
-            ratio * adv,
-            ratio.clamp(1 - args.clip_eps, 1 + args.clip_eps) * adv
+            ratio * advantages,
+            ratio.clamp(1 - args.clip_eps, 1 + args.clip_eps) * advantages
         ).mean()
-
-        # value loss
-        loss_val = F.mse_loss(new_values, returns.to(device))
-
-        # entropy bonus
-        loss_ent = -args.entropy_coef * entropies.mean()
-
-        loss = loss_clip + 0.5 * loss_val + loss_ent
+        loss_val  = F.mse_loss(new_values.squeeze(), returns)
+        loss_ent  = -args.entropy_coef * entropy
+        loss      = loss_clip + 0.5 * loss_val + loss_ent
 
         opt_policy.zero_grad(set_to_none=True)
         loss.backward()
         nn.utils.clip_grad_norm_(policy.parameters(), max_norm=0.5)
         opt_policy.step()
 
-    # accumulate for aux phase
-    aux_buffer_states.extend([s.to(device) for s in buffer.all_edge_states])
+    # accumulate chosen states for aux phase
+    aux_buffer_states.append(chosen_t.detach().cpu())
     aux_buffer_returns.extend(returns.tolist())
 
     # ---- PPG auxiliary phase (every aux_every episodes) ----
     if episode % args.aux_every == 0 and aux_buffer_states:
-        policy.train()
-        aux_returns_t = torch.tensor(aux_buffer_returns, dtype=torch.float32, device=device)
+        all_chosen = torch.cat(aux_buffer_states, dim=0).to(device)  # (N, edge_state_dim)
+        all_returns = torch.tensor(aux_buffer_returns, dtype=torch.float32, device=device)
 
         for _ in range(args.n_aux_epochs):
-            aux_vals = []
-            for states in aux_buffer_states:
-                aux_vals.append(aux_head(states.to(device)))
-            aux_vals = torch.stack(aux_vals)
+            aux_vals = aux_head(all_chosen)
+            loss_aux = F.mse_loss(aux_vals.squeeze(), all_returns)
 
-            # aux head learns to predict returns
-            loss_aux = F.mse_loss(aux_vals, aux_returns_t)
-
-            # policy distillation: keep policy close to old policy during aux phase
             with torch.no_grad():
-                old_logits_list = [policy(s.to(device))[0] for s in aux_buffer_states]
-            new_logits_list = [policy(s.to(device))[0] for s in aux_buffer_states]
-            distill_loss = sum(
-                F.kl_div(
-                    F.log_softmax(new_l, dim=-1),
-                    F.softmax(old_l, dim=-1),
-                    reduction="batchmean"
-                )
-                for new_l, old_l in zip(new_logits_list, old_logits_list)
-            ) / len(aux_buffer_states)
+                old_logits = policy(all_chosen)[0].detach()
+            new_logits = policy(all_chosen)[0]
+            distill_loss = F.kl_div(
+                F.log_softmax(new_logits, dim=-1),
+                F.softmax(old_logits, dim=-1),
+                reduction="batchmean"
+            )
 
             loss = loss_aux + distill_loss
-
             opt_aux.zero_grad(set_to_none=True)
             loss.backward()
             nn.utils.clip_grad_norm_(aux_head.parameters(), max_norm=0.5)
