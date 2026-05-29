@@ -1,34 +1,73 @@
-# RL graph construction - design doc
+# GraphHARE — RL graph construction with homophily-aware reward
 
-_last updated: 2026-05-12. reflects fadi's revisions + graphrare findings + dataset pivot to cora/pubmed._
-
----
-
-## problem framing
-
-replace the static graph used by graphsage with one optimized by an RL agent. the frozen graphsage classifier is the "environment" -- the agent edits the graph, sage scores it, agent gets rewarded.
-
-primary datasets: **cora** and **pubmed** (planetoid). baseline numbers confirmed:
-- cora: graphsage 0.879 ± 0.013, MLP 0.757 ± 0.012 (12pp gap)
-- pubmed: graphsage 0.886 ± 0.003, MLP 0.876 ± 0.003 (1pp gap -- cora is primary)
+_last updated: 2026-05-18. reflects revised contribution framing (homophily-aware reward), homophily diagnostic as pre-training gate, and dataset pivot to cora/pubmed/citeseer._
 
 ---
 
-## contribution pillars (differentiating from graphrare)
+## name
 
-three things that make this publishable beyond graphrare:
+**GraphHARE** — Homophily-Aware Reward for Edges. Directly contrasts with GraphRARE (Relative Entropy Reward): GraphRARE rewards on entropy-ranked candidate edges with an accuracy/loss-based reward signal; GraphHARE rewards on the homophily of the resulting graph in addition to classification gain.
 
-**1. novel reward design -- class-imbalance-aware**
-```
-r_t = delta_macro_f1_t + gamma * delta_f1_minority_t
-```
-graphrare uses delta accuracy + delta loss on the training set. we use macro-F1 + a minority class bonus on a held-out policy_val split. this directly targets class imbalance rather than optimizing accuracy which can ignore minority classes entirely. gamma is a tunable weight (start with 0.5).
+---
 
-**2. PPG over PPO**
-we use phasic policy gradient (cobbe et al. 2021) via cleanrl rather than vanilla PPO. PPG separates policy and value function updates into alternating phases, giving better sample efficiency and stability. graphrare used PPO -- PPG is a direct upgrade on the same framework.
+## research question and contribution
 
-**3. head-to-head vs differentiable graph learning methods**
-we compare against LDS-GNN and IDGL (differentiable graph structure learning), not just fixed-graph baselines. this answers "is RL worth the added complexity over differentiable alternatives?" -- a question graphrare never asks.
+GraphRARE (ICDE 2024) established that RL can improve a base graph for downstream node classification. Their agent receives reward based on classification accuracy and loss, and they report homophily improvements as a _byproduct_ of training — not as a designed objective.
+
+**GraphHARE's research question**: what if homophily is incorporated _directly_ into the reward, instead of left as a byproduct?
+
+### Primary contribution (single, focused)
+
+A **homophily-aware reward function** for RL-based graph structure learning. The reward explicitly combines:
+
+1. Downstream classification improvement (the goal)
+2. Edge homophily of the resulting graph (a structural prior)
+
+allowing the agent to explicitly trade off accuracy gains against structural cleanliness. To our knowledge, **no prior RL graph construction method incorporates homophily directly into the reward signal**. Verified through literature search:
+
+- GraphRARE (ICDE 2024): accuracy + loss reward; homophily is a byproduct, not in the signal
+- HoLe (CIKM 2023): homophily-as-objective, but for unsupervised clustering and not RL
+- "It Takes a Graph" (arXiv 2025): rewires for homophily via theoretical diffusion, not RL
+- DHGR, TRIGON, ComFy: heuristic or supervised graph rewiring, not RL
+
+### What this paper is NOT
+
+- Not a new RL algorithm (we use standard policy optimization)
+- Not a new GNN architecture (we use GraphSAGE)
+- Not a head-to-head benchmark of RL vs differentiable methods (that's an experimental section, not a contribution)
+- Not a "frozen classifier methodology" claim (frozen classifier with RL has been done — RELIEF, KDD 2025 — and is good practice rather than novelty)
+
+### Target venue
+
+Mid-tier IEEE conference (IEEE BigData, IJCNN) as a methodology paper.
+
+---
+
+## pre-training requirement: homophily diagnostic
+
+**Mandatory step before any RL training begins.** Compute edge homophily of:
+
+1. The starting citation graph (cora/pubmed/citeseer)
+2. The candidate edge pool derived from feature-similarity KNN
+3. (Later) the RL-refined graph at the end of training
+
+For C-class balanced data, the random-graph baseline is 1/C. If the candidate edge pool's homophily is close to the random baseline, graph-based refinement is unlikely to recover meaningful improvement (the graph would be encoding signal already present in the features). The advisor has applied this diagnostic in recent work and confirmed it is a reliable pre-training screen — treat it as a gate, not as post-hoc reporting.
+
+If a dataset's candidate pool fails the check, flag immediately and decide whether to drop the dataset before investing GPU time.
+
+Standard formulation: Zhu et al. 2020, *Beyond Homophily in Graph Neural Networks*.
+
+---
+
+## datasets
+
+**Primary**: Cora and PubMed.
+
+**Required for breadth**: Citeseer.
+
+**Optional stretch**: one heterophilic benchmark (Chameleon or Cornell) from GraphRARE's set, if buffer time allows.
+
+Sentiment dataset dropped — MLP was already competitive with GraphSAGE, indicating the constructed graph contributes minimally beyond features.
 
 ---
 
@@ -36,149 +75,164 @@ we compare against LDS-GNN and IDGL (differentiable graph structure learning), n
 
 ### 1. candidate edge pool
 
-two sources of candidate edges per node:
+Two sources of candidate edges per node:
 
-- **existing graph edges** -- original citation edges in cora/pubmed. starting topology.
-- **kNN-k feature pool** -- built once from node features. gives candidate edges not in the original graph.
+- **existing graph edges** — original citation edges in cora/pubmed/citeseer. Starting topology.
+- **kNN-k feature pool** — built once from node features (bag-of-words for cora, tfidf for pubmed). Gives candidate edges not in the original graph.
 
-agent can add from the kNN pool or remove from existing edges. both operations matter (graphrare ablation: add-only and remove-only both underperform vs add+remove).
+Agent can add from the kNN pool or remove from existing edges. Pre-training homophily must be measured on both the starting graph and the kNN pool (see above).
 
 ### 2. state
 
-per-node state using structural features (not raw node features):
+Per-node state (compact, structural-leaning):
 
-```
-s_i = [h_i || sage_logits_i || degree_i || homophily_i || structural_entropy_i]
-```
+- node features (bag-of-words / tfidf, with optional projection)
+- frozen graphsage hidden embedding
+- frozen graphsage softmax output (class probabilities)
+- current degree (scalar)
+- structural entropy: entropy of the neighbor label distribution under graphsage's predictions
+- local homophily proxy: fraction of neighbors with matching graphsage-predicted label
 
-- `h_i`: graphsage embedding for node i from frozen model (hidden_dim)
-- `sage_logits_i`: frozen sage softmax output (n_classes)
-- `degree_i`: current degree (scalar)
-- `homophily_i`: fraction of neighbors with same predicted class (scalar)
-- `structural_entropy_i`: entropy of neighbor label distribution (scalar)
-
-note: we use structural features rather than raw node features (1433-dim for cora) in the state. raw features are available to sage already -- the policy needs graph-level signals to decide which edges to change.
+The last two are structural signals; they are the natural state features for an agent whose reward incorporates homophily.
 
 ### 3. action space
 
-**per-edge, sequential:**
+**Per-edge, sequential:**
 
-at each step the agent picks one edge action:
-```
-(node_i, node_j, op)  where op in {add, remove}
-```
+At each step the agent picks one edge action `(node_i, node_j, op)` where `op ∈ {add, remove}`.
 
 - add: draw from kNN candidate pool for node i
 - remove: remove an existing edge incident to node i
 
-one episode = 50-100 sequential edge edits. the agent sees updated graph state between edits (not bandit).
+One episode = 50–100 sequential edge edits. Not bandit — the agent sees the updated graph state between edits.
 
-**constraint:** min degree >= 2 per node (prevent isolated nodes).
+**Constraint**: minimum degree ≥ 2 per node (prevent isolated nodes).
 
 ### 4. policy network
 
-**MLP (not a GNN policy):**
+**MLP over edge state pairs:**
 
-graphrare used an MLP policy and achieved strong results. GNN policy adds complexity without clear benefit.
+Input is the concatenation of state_i, state_j, and edge-level features (cosine similarity of features, current degree delta, in-original-graph indicator). Output is a softmax over `{add, remove}` and a candidate-score head.
 
-```
-input: [s_i || s_j || edge_features_ij]
-  - edge_features_ij: cosine_sim(h_i, h_j), delta_degree, in_original_graph (bool)
--> MLP: (state_dim -> 256 -> 128 -> 2)
--> softmax over {add, remove}
-```
+MLP over a GNN policy here is justified: the structural state features already encode local graph context, so message passing inside the policy is not strictly required for this task scope. GraphRARE also used an MLP policy.
 
-### 5. reward
+### 5. reward (the contribution)
 
-**dense, class-imbalance-aware, every ~5 edits, EMA-smoothed:**
+**Homophily-aware reward, computed every M=5 edits with EMA smoothing.**
 
-```
-r_t = delta_macro_f1_t + gamma * delta_f1_minority_t
-```
+Conceptually, the reward at evaluation step _t_ combines two terms:
 
-- `delta_macro_f1_t`: change in macro-F1 on policy_val vs episode start
-- `delta_f1_minority_t`: change in F1 of the minority class specifically
-- `gamma`: minority class weight (default 0.5, tune in ablation)
-- computed every 5 edits, smoothed with EMA (alpha=0.3)
-- evaluated on `policy_val` split (held out from sage training entirely)
+1. **Classification term**: change in macro-F1 on the held-out policy_val between consecutive evaluation points, relative to a fixed baseline F1 computed once at episode start.
+2. **Homophily term**: change in edge homophily of the graph between consecutive evaluation points.
 
-rationale: accuracy-based reward ignores minority class failures. macro-F1 + minority bonus directly penalizes ignoring hard classes. graphrare uses training-set accuracy which can overfit to majority class.
+A hyperparameter β ∈ [0, ∞) controls the weight of the homophily term. The accuracy-only baseline reduces to β = 0; the homophily-only baseline is the limit β → ∞; the proposed homophily-aware reward sits between them.
+
+**Ablation structure** (this is the empirical core):
+
+- β = 0 (accuracy-only): replicates GraphRARE's reward design
+- β > 0, multiple values (homophily-aware): our proposed family of rewards
+- β → ∞ proxy (homophily-only): an extreme to characterize the trade-off
+
+Per-step F1 noise on the small policy_val (~270 nodes for cora) is real. We mitigate via:
+
+- evaluating every M=5 edits, not every step
+- exponential moving average over the last 5–10 evaluation deltas
+
+Rationale: sparse (one reward per episode) was too slow; dense every-step was too noisy. Every-5 with EMA is the middle ground that matches the existing literature's reward density.
 
 ### 6. episode structure
 
-```
-1. start: original citation graph for cora/pubmed
-2. for step in range(50-100):
-   a. policy reads current graph state
-   b. samples (node_i, node_j, op) from action distribution
-   c. apply edit to graph
-   d. every 5 steps: run frozen sage forward on policy_val, compute r_t
-3. PPG update (policy phase + value phase alternating)
-```
+Initial state: starting citation graph (cora/pubmed/citeseer).
 
-episode length: 50-100 steps. full graph state updated between steps.
+Per step: agent reads current graph state, samples an edge action, applies the edit. Every 5 steps the graph is evaluated for macro-F1 and edge homophily on policy_val. Reward is the homophily-aware combination.
+
+Episode terminates after the edit budget (50–100 edits) or when no remaining candidate has Q above a threshold.
 
 ### 7. algorithm
 
-**PPG (phasic policy gradient) via cleanrl:**
+**PPO via stable-baselines3** to get the loop running. Replace with **PPG (Phasic Policy Gradient, Cobbe et al. 2021)** if PPO plateaus or shows instability after 200 episodes. The algorithm choice is not a contribution; the reward design is.
 
-skip REINFORCE (high variance) and go straight to PPG.
+PPO hyperparameters:
 
-PPG config:
-- clip ratio epsilon = 0.2
-- policy phase: update policy network
-- auxiliary phase: update value head with distillation loss
-- entropy bonus: 0.01 (encourage exploration early)
-- use cleanrl PPG implementation
+- clip ratio ε = 0.2
+- entropy bonus = 0.01
+- update every episode
+- standard advantage estimation (GAE)
 
-**fallback:** if PPG is unstable early, start with PPO for first 200 episodes then switch to PPG.
+Don't roll your own — use library implementations (stable-baselines3 for PPO, CleanRL for PPG).
 
 ---
 
 ## graphrare comparison
 
-| dimension | graphrare | our approach |
+| dimension | GraphRARE | GraphHARE (us) |
 |---|---|---|
-| backbone | co-trained GNN + DRL | frozen graphsage (no co-training) |
-| target graphs | heterophilic (chameleon, squirrel...) | homophilic (cora, pubmed) |
-| reward | delta acc + loss on train set | delta macro-f1 + minority bonus on policy_val |
-| algorithm | PPO | PPG (cleanrl) |
-| comparison | vs fixed-graph GNNs only | vs fixed-graph GNNs + differentiable methods (LDS-GNN, IDGL) |
-| action | per-node add k + remove d | per-edge add/remove sequential |
-| state | node features + structural entropy | structural features only (degree, homophily, entropy, sage embeddings) |
+| reward signal | Δaccuracy + λ · Δloss | **Δmacro-F1 + β · Δhomophily** (the contribution) |
+| homophily | byproduct, reported as result | **direct training signal** |
+| backbone | co-trained GNN + DRL | frozen graphsage (good practice; not the contribution) |
+| target graphs | both homophilic (cora, pubmed) and heterophilic (chameleon, squirrel, ...) | homophilic primary (cora, pubmed, citeseer); optional heterophilic stretch |
+| edge prior | node relative entropy ranking | feature kNN pool + existing edges |
+| action | multi-discrete per-node (k add + d remove) | per-edge sequential add/remove |
+| reward eval | training-set accuracy/loss | held-out policy_val (good practice; not the contribution) |
 | policy net | MLP | MLP |
-| graph used | original + long-range edges | original citation + kNN candidates |
+| algorithm | PPO | PPO (PPG if needed) |
+
+The contribution row is the reward signal. Everything else is either good practice (frozen backbone, held-out eval) or a design choice with no novelty claim.
 
 ---
 
-## targets to beat (cora)
+## targets and what success looks like
 
-| target | value | what it means |
-|---|---|---|
-| MLP baseline | 0.757 ± 0.012 | proves graph adds value at all |
-| graphsage baseline | 0.879 ± 0.013 | beats standard fixed graph |
-| graphsage-RARE (graphrare) | ~0.890 | matches competing RL method |
+Baseline numbers on Cora (under your 60/10/10/20 split, 10 seeds):
+
+- MLP: 0.757 ± 0.012
+- GraphSAGE (default graph): 0.879 ± 0.013
+
+What we want to see from GraphHARE on Cora:
+
+- Beat GraphSAGE (default graph) with non-overlapping CIs at some β > 0
+- Characterize the β trade-off: how does accuracy improvement scale with the homophily weight?
+- Demonstrate distinct structural properties (final-graph homophily) compared to β = 0
+
+If β = 0 and β > 0 produce indistinguishable results, the contribution weakens to "GraphRARE's accuracy gains are robust to reward design" — still publishable, weaker positioning. If they produce measurably different graphs and different generalization, the contribution is strong.
+
+PubMed has a narrower MLP-vs-GraphSAGE gap (~1 pp). Treat as secondary; success here is "method works, gain is small."
+
+Citeseer is required for breadth.
 
 ---
 
-## open assumptions
+## open assumptions and risks
 
 | assumption | risk | mitigation |
 |---|---|---|
-| frozen sage is sufficient signal | agent may not get enough gradient to learn | if val f1 doesn't move in 50 eps, try co-training |
-| 50-100 edits is right episode length | too few = can't reshape graph, too many = unstable | sweep [20, 50, 100] in ablation |
-| kNN pool gives useful candidates | citation edges already high quality, kNN may add noise | start with remove-only from existing edges, add kNN later |
-| MLP policy is sufficient | may need graph context to make good decisions | fallback: 1-layer sage as policy encoder |
-| gamma=0.5 for minority bonus | wrong weighting hurts convergence | sweep gamma in [0.1, 0.5, 1.0] |
+| Homophily-aware reward produces distinguishably different graphs from accuracy-only | If they converge to the same solution, contribution weakens | Run ablation early (week 5). If β = 0 ≈ β > 0, adjust β range or pivot framing toward "robustness of accuracy-only" |
+| Frozen graphsage is sufficient signal | Agent may not get enough gradient to learn | If val f1 doesn't move in 50 episodes, try (a) co-training as a fallback, (b) richer state features |
+| 50–100 edits is right episode length | Too few = can't reshape graph; too many = unstable | Sweep [20, 50, 100] in ablation |
+| KNN pool gives useful candidates | Citation edges already high quality; KNN may add noise edges | The pre-training homophily check on the KNN pool catches this before training |
+| Dense every-5 reward is informative | Small policy_val (~270 cora) may still be noisy | If variance too high, try every-10 or full-episode |
 
 ---
 
 ## implementation order
 
-1. `GraphEnv` class -- wraps frozen sage + policy_val eval + episode step logic
-2. `PolicyNet` class -- MLP over edge state pairs
-3. PPG training loop -- cleanrl-based, ~100 episodes smoke test on cora
-4. logging -- wandb: per-episode reward, val f1, minority class f1, action histograms, policy gradient norms
-5. ablation -- episode length, gamma, reward frequency, add-only vs remove-only vs both
-6. LDS-GNN + IDGL comparison runs
-7. evaluate vs graphrare with 10-split CI on cora + pubmed
+1. **Pre-training homophily check** on Cora, PubMed, Citeseer (starting graph + KNN pool). Flag any dataset where the pool is near random baseline. This is the gate.
+2. `GraphEnv` class — wraps frozen graphsage, manages graph state, applies edge edits, computes the dual reward signal (classification + homophily).
+3. `PolicyNet` class — MLP over edge state pairs.
+4. **PPO training loop** — stable-baselines3-based, ~100 episodes smoke test on Cora with β = 0 (replicate GraphRARE-style accuracy-only baseline).
+5. **β ablation** — train at β ∈ {0, 0.1, 0.5, 1.0, 2.0} and characterize the trade-off curve.
+6. **Logging via wandb**: per-episode reward, val F1, edge homophily of current graph, action histograms (add vs remove ratio), policy gradient norms.
+7. **Multi-seed evaluation** on Cora; then PubMed; then Citeseer.
+8. **PPG** if PPO plateaus.
+9. **Paper draft** with the contribution centered on the homophily-aware reward and the β ablation as the empirical core.
+
+---
+
+## what to focus on
+
+In priority order:
+
+1. The β = 0 vs β > 0 ablation. This is the empirical core. Plan it from day one, not as an afterthought.
+2. The pre-training homophily check on each dataset. Mandatory gate.
+3. Clean reproduction of the GraphRARE-style accuracy-only baseline (β = 0) so the contrast is honest.
+4. Reporting edge homophily of the resulting graph at every β setting, alongside accuracy. The homophily of the output graph is part of what we are claiming the reward controls.
