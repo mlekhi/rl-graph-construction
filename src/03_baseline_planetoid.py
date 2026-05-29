@@ -59,7 +59,7 @@ MAX_EPOCHS_FINAL = 300
 PATIENCE_FINAL   = 30
 OPTIMIZE_METRIC  = "accuracy"
 
-ROOT = Path(__file__).parent
+ROOT = Path(__file__).parent.parent
 DATA_DIR    = ROOT / "data" / "planetoid"
 RUN_DIR     = ROOT / "runs" / f"baseline_{DATASET.lower()}"
 METRICS_DIR = RUN_DIR / "metrics"
