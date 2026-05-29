@@ -75,9 +75,10 @@ set_seed(args.seed)
 if args.wandb:
     import wandb
     wandb.init(
-        project="rl-graph-construction",
-        name=f"PPO-{args.dataset}-seed{args.split_seed}",
+        project="graphhare",
+        name=f"{args.dataset}-beta{args.beta}-seed{args.split_seed}",
         config=vars(args),
+        tags=[args.dataset, f"beta{args.beta}"],
     )
     log = wandb.log
 else:
@@ -159,8 +160,10 @@ for episode in range(1, args.n_episodes + 1):
     buffer.clear()
     env.reset()
 
-    ep_reward = 0.0
-    ep_valid  = 0
+    ep_reward  = 0.0
+    ep_valid   = 0
+    ep_adds    = 0
+    ep_removes = 0
 
     # ---- collect one episode ----
     policy.eval()
@@ -183,6 +186,10 @@ for episode in range(1, args.n_episodes + 1):
         _, reward, done, info = env.step(action)
         ep_reward += reward
         ep_valid  += int(info["valid_action"])
+        if action[2] == "add":
+            ep_adds += 1
+        else:
+            ep_removes += 1
 
         buffer.add(
             all_states=all_states,         # cpu tensor
@@ -235,7 +242,7 @@ for episode in range(1, args.n_episodes + 1):
 
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
-        nn.utils.clip_grad_norm_(policy.parameters(), max_norm=0.5)
+        grad_norm = nn.utils.clip_grad_norm_(policy.parameters(), max_norm=0.5)
         optimizer.step()
 
     # ---- eval + logging ----
@@ -256,9 +263,13 @@ for episode in range(1, args.n_episodes + 1):
         "delta_homophily": delta_homophily,
         "valid_actions": ep_valid,
         "n_edges": env.current_edge_index.size(1),
-        "loss_clip": loss_clip.item(),
-        "loss_val": loss_val.item(),
-        "entropy": entropy.item(),
+        "actions/adds": ep_adds,
+        "actions/removes": ep_removes,
+        "actions/add_ratio": ep_adds / max(ep_adds + ep_removes, 1),
+        "loss/clip": loss_clip.item(),
+        "loss/value": loss_val.item(),
+        "loss/entropy": entropy.item(),
+        "grad_norm": grad_norm.item(),
     })
 
     if macro_f1 > best_macro_f1:
