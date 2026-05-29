@@ -5,10 +5,10 @@ GraphEnv: gym-style environment for RL graph construction.
 
 The agent sequentially edits a citation graph (add/remove edges).
 A frozen GraphSAGE scores the result on policy_val.
-Reward: r_t = delta_macro_f1 + gamma * delta_f1_minority
+Reward: r_t = delta_macro_f1 + beta * delta_homophily  (GraphHARE)
 
 Usage:
-    env = GraphEnv(dataset="Cora", split_seed=42, gamma=0.5, knn_k=10)
+    env = GraphEnv(dataset="Cora", split_seed=42, beta=0.5, knn_k=10)
     state, candidates = env.reset()
     for step in range(env.max_steps):
         action = policy(state, candidates)   # (node_i, node_j, op)
@@ -71,7 +71,7 @@ class GraphEnv:
         self,
         dataset: str = "Cora",
         split_seed: int = 42,
-        gamma: float = 0.5,        # minority class reward weight
+        beta: float = 0.5,         # homophily reward weight (beta=0 -> accuracy-only)
         knn_k: int = 10,           # kNN candidate pool size
         max_steps: int = 50,       # edits per episode
         reward_every: int = 5,     # compute reward every N steps
@@ -81,7 +81,7 @@ class GraphEnv:
     ):
         self.dataset    = dataset
         self.split_seed = split_seed
-        self.gamma      = gamma
+        self.beta       = beta
         self.knn_k      = knn_k
         self.max_steps  = max_steps
         self.reward_every = reward_every
@@ -102,7 +102,7 @@ class GraphEnv:
               f"{self.original_edge_index.size(1)} edges | "
               f"kNN pool: {sum(len(v) for v in self.knn_pool.values())} candidates | "
               f"baseline macro_f1={self.baseline_macro_f1:.4f} | "
-              f"baseline minority_f1={self.baseline_minority_f1:.4f}")
+              f"baseline homophily={self.baseline_homophily:.4f}")
 
     # ----------------------------------------------------------
     # setup
@@ -134,12 +134,6 @@ class GraphEnv:
         self.policy_val_mask = masks["policy_val_mask"].to(self.device)
         self.test_mask       = masks["test_mask"].to(self.device)
 
-        # find minority class (smallest count in policy_val)
-        pv_labels = self.y[self.policy_val_mask].cpu().numpy()
-        counts = np.bincount(pv_labels, minlength=self.num_classes)
-        self.minority_class = int(counts.argmin())
-        print(f"minority class: {self.minority_class} "
-              f"(count in policy_val: {counts[self.minority_class]})")
 
     def _load_frozen_sage(self):
         ckpt_path = ROOT / "runs" / f"rl_{self.dataset.lower()}" / f"frozen_sage_seed{self.split_seed}.pt"
@@ -184,10 +178,10 @@ class GraphEnv:
             self.knn_pool[i] = candidates
 
     def _compute_baseline(self):
-        """F1 scores on original graph -- reward delta is relative to these."""
-        mf1, min_f1 = self._eval_f1(self.original_edge_index.to(self.device))
-        self.baseline_macro_f1   = mf1
-        self.baseline_minority_f1 = min_f1
+        """F1 and homophily on original graph -- reward deltas are relative to these."""
+        mf1, _ = self._eval_f1(self.original_edge_index.to(self.device))
+        self.baseline_macro_f1  = mf1
+        self.baseline_homophily = self._eval_homophily(self.original_edge_index)
 
     # ----------------------------------------------------------
     # gym interface
@@ -198,6 +192,8 @@ class GraphEnv:
         self.step_count  = 0
         self.done        = False
         self.ema_reward  = 0.0
+        self.episode_start_macro_f1  = self.baseline_macro_f1
+        self.episode_start_homophily = self.baseline_homophily
         self._refresh_sage_cache()
         return self._get_node_states(), self._get_all_candidates()
 
@@ -216,10 +212,11 @@ class GraphEnv:
         # compute reward every reward_every steps
         reward = 0.0
         if self.step_count % self.reward_every == 0:
-            mf1, min_f1 = self._eval_f1(self.current_edge_index)
-            delta_macro   = mf1   - self.baseline_macro_f1
-            delta_minority = min_f1 - self.baseline_minority_f1
-            raw_reward = delta_macro + self.gamma * delta_minority
+            mf1, _   = self._eval_f1(self.current_edge_index)
+            homophily = self._eval_homophily(self.current_edge_index)
+            delta_macro    = mf1      - self.baseline_macro_f1
+            delta_homophily = homophily - self.baseline_homophily
+            raw_reward = delta_macro + self.beta * delta_homophily
             # EMA smoothing
             self.ema_reward = (
                 self.ema_alpha * raw_reward + (1 - self.ema_alpha) * self.ema_reward
@@ -449,7 +446,7 @@ class GraphEnv:
     # reward computation
     # ----------------------------------------------------------
     def _eval_f1(self, edge_index):
-        """Macro-F1 and minority class F1 on policy_val."""
+        """Macro-F1 on policy_val."""
         self.sage.eval()
         with torch.no_grad():
             logits = self.sage(self.x, edge_index)
@@ -459,16 +456,29 @@ class GraphEnv:
         _, _, f1_per_class, _ = precision_recall_fscore_support(
             true, pred, average=None, labels=list(range(self.num_classes)), zero_division=0
         )
-        macro_f1   = float(f1_per_class.mean())
-        minority_f1 = float(f1_per_class[self.minority_class])
-        return macro_f1, minority_f1
+        macro_f1 = float(f1_per_class.mean())
+        return macro_f1, f1_per_class
+
+    def _eval_homophily(self, edge_index):
+        """
+        Edge homophily (Zhu et al. 2020) using ground-truth labels:
+            h = |{(i,j) in E : y_i == y_j}| / |E|
+        Counts each undirected edge once (src < dst).
+        """
+        src = edge_index[0].cpu()
+        dst = edge_index[1].cpu()
+        mask = src < dst
+        src, dst = src[mask], dst[mask]
+        if len(src) == 0:
+            return 0.0
+        labels = self.y.cpu()
+        return float((labels[src] == labels[dst]).float().mean().item())
 
     # ----------------------------------------------------------
     # utils
     # ----------------------------------------------------------
-    def get_current_f1(self):
-        """Current macro-F1 and minority F1 (for logging)."""
-        return self._eval_f1(self.current_edge_index)
-
-    def get_baseline_f1(self):
-        return self.baseline_macro_f1, self.baseline_minority_f1
+    def get_current_metrics(self):
+        """Current macro-F1 and edge homophily (for logging)."""
+        macro_f1, _ = self._eval_f1(self.current_edge_index)
+        homophily   = self._eval_homophily(self.current_edge_index)
+        return macro_f1, homophily

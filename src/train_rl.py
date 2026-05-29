@@ -34,7 +34,7 @@ parser.add_argument("--split_seed",   type=int, default=42)
 parser.add_argument("--n_episodes",   type=int, default=500)
 parser.add_argument("--max_steps",    type=int, default=50)
 parser.add_argument("--reward_every", type=int, default=5)
-parser.add_argument("--gamma_reward", type=float, default=0.5,  help="minority class reward weight")
+parser.add_argument("--beta",         type=float, default=0.5,  help="homophily reward weight (0=accuracy-only)")
 parser.add_argument("--knn_k",        type=int, default=10)
 parser.add_argument("--lr",           type=float, default=3e-4)
 parser.add_argument("--gamma",        type=float, default=0.99, help="discount factor")
@@ -89,7 +89,7 @@ else:
 env = GraphEnv(
     dataset=args.dataset,
     split_seed=args.split_seed,
-    gamma=args.gamma_reward,
+    beta=args.beta,
     knn_k=args.knn_k,
     max_steps=args.max_steps,
     reward_every=args.reward_every,
@@ -151,8 +151,9 @@ buffer = RolloutBuffer()
 best_macro_f1 = env.baseline_macro_f1
 episode_rewards = []
 episode_macro_f1s = []
+episode_homophilys = []
 
-print(f"\nbaseline: macro_f1={env.baseline_macro_f1:.4f}  minority_f1={env.baseline_minority_f1:.4f}\n")
+print(f"\nbaseline: macro_f1={env.baseline_macro_f1:.4f}  homophily={env.baseline_homophily:.4f}  beta={args.beta}\n")
 
 for episode in range(1, args.n_episodes + 1):
     buffer.clear()
@@ -238,20 +239,21 @@ for episode in range(1, args.n_episodes + 1):
         optimizer.step()
 
     # ---- eval + logging ----
-    macro_f1, minority_f1 = env.get_current_f1()
+    macro_f1, homophily = env.get_current_metrics()
     episode_rewards.append(ep_reward)
     episode_macro_f1s.append(macro_f1)
+    episode_homophilys.append(homophily)
 
-    delta_macro   = macro_f1   - env.baseline_macro_f1
-    delta_minority = minority_f1 - env.baseline_minority_f1
+    delta_macro     = macro_f1  - env.baseline_macro_f1
+    delta_homophily = homophily - env.baseline_homophily
 
     log({
         "episode": episode,
         "reward": ep_reward,
         "macro_f1": macro_f1,
-        "minority_f1": minority_f1,
+        "homophily": homophily,
         "delta_macro_f1": delta_macro,
-        "delta_minority_f1": delta_minority,
+        "delta_homophily": delta_homophily,
         "valid_actions": ep_valid,
         "n_edges": env.current_edge_index.size(1),
         "loss_clip": loss_clip.item(),
@@ -266,7 +268,7 @@ for episode in range(1, args.n_episodes + 1):
     if episode % 10 == 0 or episode <= 5:
         print(f"ep {episode:04d} | reward={ep_reward:+.4f} | "
               f"macro_f1={macro_f1:.4f} (d={delta_macro:+.4f}) | "
-              f"minority_f1={minority_f1:.4f} (d={delta_minority:+.4f}) | "
+              f"homophily={homophily:.4f} (d={delta_homophily:+.4f}) | "
               f"edges={env.current_edge_index.size(1)}")
 
 # ============================================================
@@ -284,12 +286,14 @@ results = {
     "dataset": args.dataset,
     "split_seed": args.split_seed,
     "n_episodes": args.n_episodes,
+    "beta": args.beta,
     "baseline_macro_f1": env.baseline_macro_f1,
-    "baseline_minority_f1": env.baseline_minority_f1,
+    "baseline_homophily": env.baseline_homophily,
     "best_macro_f1": best_macro_f1,
     "delta_macro_f1": best_macro_f1 - env.baseline_macro_f1,
     "episode_rewards": episode_rewards,
     "episode_macro_f1s": episode_macro_f1s,
+    "episode_homophilys": episode_homophilys,
     "args": vars(args),
 }
 (OUT_DIR / "results.json").write_text(json.dumps(results, indent=2))
