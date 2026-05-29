@@ -155,6 +155,8 @@ def run_diagnostic(dataset_name, knn_k):
 
 
 # ============================================================
+import json
+
 results = []
 for ds in args.datasets:
     r = run_diagnostic(ds, args.knn_k)
@@ -170,3 +172,9 @@ for r in results:
     ratio = r["h_knn_pool"] / r["random_baseline_uniform"]
     print(f"  {r['dataset']:<12} {r['h_original']:>12.4f} {r['h_knn_pool']:>12.4f} "
           f"{r['random_baseline_uniform']:>12.4f} {ratio:>7.1f}x")
+
+# save
+out_path = ROOT / "runs" / "homophily_diagnostic.json"
+out_path.parent.mkdir(parents=True, exist_ok=True)
+out_path.write_text(json.dumps(results, indent=2))
+print(f"\n  saved to {out_path}")
