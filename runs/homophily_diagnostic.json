@@ -1,0 +1,32 @@
+[
+  {
+    "dataset": "Cora",
+    "num_nodes": 2708,
+    "num_classes": 7,
+    "h_original": 0.8099659085273743,
+    "h_knn_pool": 0.5172740817070007,
+    "random_baseline_uniform": 0.14285714285714285,
+    "random_baseline_empirical": 0.17956778864091077,
+    "knn_pool_edges": 25214
+  },
+  {
+    "dataset": "PubMed",
+    "num_nodes": 19717,
+    "num_classes": 3,
+    "h_original": 0.8023869395256042,
+    "h_knn_pool": 0.7134231925010681,
+    "random_baseline_uniform": 0.3333333333333333,
+    "random_baseline_empirical": 0.35688425567779924,
+    "knn_pool_edges": 191962
+  },
+  {
+    "dataset": "CiteSeer",
+    "num_nodes": 3327,
+    "num_classes": 6,
+    "h_original": 0.7355008721351624,
+    "h_knn_pool": 0.5254114270210266,
+    "random_baseline_uniform": 0.16666666666666666,
+    "random_baseline_empirical": 0.17785830950763165,
+    "knn_pool_edges": 30012
+  }
+]
