@@ -77,12 +77,14 @@ class GraphEnv:
         reward_every: int = 5,     # compute reward every N steps
         ema_alpha: float = 0.3,    # EMA smoothing for reward
         min_degree: int = 2,       # min edges per node (constraint)
+        norm_warmup: int = 20,     # reward steps before normalization kicks in
         device: torch.device = None,
     ):
         self.dataset    = dataset
         self.split_seed = split_seed
         self.beta       = beta
         self.knn_k      = knn_k
+        self.norm_warmup = norm_warmup
         self.max_steps  = max_steps
         self.reward_every = reward_every
         self.ema_alpha  = ema_alpha
@@ -97,6 +99,7 @@ class GraphEnv:
         self._load_frozen_sage()
         self._build_knn_pool()
         self._compute_baseline()
+        self._init_norm_stats()
 
         print(f"GraphEnv ready | {dataset} | {self.num_nodes} nodes | "
               f"{self.original_edge_index.size(1)} edges | "
@@ -183,6 +186,38 @@ class GraphEnv:
         self.baseline_macro_f1  = mf1
         self.baseline_homophily = self._eval_homophily(self.original_edge_index)
 
+    def _init_norm_stats(self):
+        """Running variance estimates for reward normalization (Welford online algorithm)."""
+        self._norm_n      = 0
+        self._norm_f1_m2  = 0.0   # sum of squared deviations for delta_f1
+        self._norm_hom_m2 = 0.0   # sum of squared deviations for delta_homophily
+        self._norm_f1_mean  = 0.0
+        self._norm_hom_mean = 0.0
+
+    def _update_norm_stats(self, delta_f1, delta_hom):
+        """Welford online update for running mean and variance."""
+        self._norm_n += 1
+        n = self._norm_n
+        # delta_f1
+        d1 = delta_f1 - self._norm_f1_mean
+        self._norm_f1_mean += d1 / n
+        self._norm_f1_m2   += d1 * (delta_f1 - self._norm_f1_mean)
+        # delta_homophily
+        d2 = delta_hom - self._norm_hom_mean
+        self._norm_hom_mean += d2 / n
+        self._norm_hom_m2   += d2 * (delta_hom - self._norm_hom_mean)
+
+    def _normalize(self, delta_f1, delta_hom):
+        """
+        Normalize delta_f1 and delta_hom by their running std.
+        During warmup (first norm_warmup steps) returns raw values.
+        """
+        if self._norm_n < self.norm_warmup:
+            return delta_f1, delta_hom
+        std_f1  = max((self._norm_f1_m2  / self._norm_n) ** 0.5, 1e-8)
+        std_hom = max((self._norm_hom_m2 / self._norm_n) ** 0.5, 1e-8)
+        return delta_f1 / std_f1, delta_hom / std_hom
+
     # ----------------------------------------------------------
     # gym interface
     # ----------------------------------------------------------
@@ -212,11 +247,14 @@ class GraphEnv:
         # compute reward every reward_every steps
         reward = 0.0
         if self.step_count % self.reward_every == 0:
-            mf1, _   = self._eval_f1(self.current_edge_index)
+            mf1, _    = self._eval_f1(self.current_edge_index)
             homophily = self._eval_homophily(self.current_edge_index)
-            delta_macro    = mf1      - self.baseline_macro_f1
-            delta_homophily = homophily - self.baseline_homophily
-            raw_reward = delta_macro + self.beta * delta_homophily
+            delta_f1  = mf1      - self.baseline_macro_f1
+            delta_hom = homophily - self.baseline_homophily
+            # update running stats then normalize
+            self._update_norm_stats(delta_f1, delta_hom)
+            norm_f1, norm_hom = self._normalize(delta_f1, delta_hom)
+            raw_reward = norm_f1 + self.beta * norm_hom
             # EMA smoothing
             self.ema_reward = (
                 self.ema_alpha * raw_reward + (1 - self.ema_alpha) * self.ema_reward
