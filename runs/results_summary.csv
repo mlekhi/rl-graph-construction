@@ -1,0 +1,9 @@
+path,dataset,split_seed,beta,n_episodes,max_steps,entropy_coef,baseline_macro_f1,best_macro_f1,delta_macro_f1,final_macro_f1,homophily_original,homophily_knn_pool,homophily_refined,delta_homophily,wall_time_sec,git_commit
+runs/rl_cora_normalized2/ppo_seed42_beta0.0/results.json,Cora,42,0.0,500,100,0.05,0.8663,0.8794,0.0131,0.8646,0.81,0.5173,0.8129,0.003,2463.9,9e8d0af
+runs/rl_cora_normalized2/ppo_seed42_beta0.1/results.json,Cora,42,0.1,500,100,0.05,0.8663,0.8807,0.0145,,,,,,,
+runs/rl_cora_normalized2/ppo_seed42_beta0.25/results.json,Cora,42,0.25,500,100,0.05,0.8663,0.88,0.0137,0.8696,0.81,0.5173,0.8145,0.0046,2382.7,9e8d0af
+runs/rl_cora_normalized2/ppo_seed42_beta0.5/results.json,Cora,42,0.5,500,100,0.05,0.8663,0.8781,0.0118,0.8663,0.81,0.5173,0.8132,0.0032,2475.4,9e8d0af
+runs/rl_cora_normalized2/ppo_seed42_beta0.75/results.json,Cora,42,0.75,500,100,0.05,0.8663,0.8786,0.0123,0.8671,0.81,0.5173,0.8135,0.0036,2331.3,9e8d0af
+runs/rl_cora_normalized2/ppo_seed42_beta1.0/results.json,Cora,42,1.0,500,100,0.05,0.8663,0.8816,0.0153,0.862,0.81,0.5173,0.814,0.004,2348.2,9e8d0af
+runs/rl_cora_normalized2/ppo_seed42_beta1.5/results.json,Cora,42,1.5,500,100,0.05,0.8663,0.8782,0.0119,0.862,0.81,0.5173,0.8135,0.0035,2353.6,9e8d0af
+runs/rl_cora_normalized2/ppo_seed42_beta2.0/results.json,Cora,42,2.0,500,100,0.05,0.8663,0.8776,0.0113,0.8706,0.81,0.5173,0.8131,0.0031,2389.6,9e8d0af
