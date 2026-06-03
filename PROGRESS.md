@@ -194,3 +194,34 @@
 - [ ] run pubmed baselines + freeze sage for pubmed
 - [ ] 10-seed CI runs at best beta on cora, citeseer, pubmed
 - [ ] thursday 3pm meeting with fadi — bring cora beta curve
+
+---
+
+## 2026-06-03
+
+### reward normalization implemented (GraphEnv)
+- added Welford online algorithm to estimate running std of delta_F1 and delta_homophily
+- reward now: `r_t = (delta_F1 / σ_F1) + β × (delta_homophily / σ_homophily)`
+- 20-step warmup before normalization kicks in (raw values used during warmup)
+- β=1 now genuinely means equal weighting — values are interpretable
+- all pre-normalization runs renamed with `prenorm_` prefix, kept as directional reference
+
+### wandb wired in and working
+- installed wandb 0.27.0 on gpu2
+- logged in as mlekhi-western-university
+- project: graphhare at wandb.ai/mlekhi-western-university/graphhare
+- run naming: `{dataset}-beta{beta}-seed{seed}`, tagged by dataset and beta
+- logging: reward, macro_f1, homophily, delta_macro_f1, delta_homophily, valid_actions, n_edges, action add/remove ratio, loss/clip, loss/value, loss/entropy, grad_norm
+
+### normalized beta sweep running on cora (seed=42, 500ep, 100 steps, entropy_coef=0.05)
+- all 7 runs started with --wandb, visible live at wandb.ai/mlekhi-western-university/graphhare
+- beta = {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0} running in parallel tmux panes on gpu2
+- early (~17 episodes): curves still in warmup, differentiation expected after episode 100
+
+### next steps
+- [ ] wait for all 7 beta runs to finish, scp results
+- [ ] build experiment tracking system (CSV per run with git commit + wall time)
+- [ ] report homophily of all 3 graphs (original, kNN pool, refined) per run
+- [ ] thursday 3pm meeting with fadi — bring cora beta curve
+- [ ] pubmed baselines + freeze sage
+- [ ] 10-seed CI at best beta
