@@ -12,6 +12,8 @@ import argparse
 import json
 import os
 import random
+import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
@@ -69,6 +71,16 @@ def set_seed(s):
 
 set_seed(args.seed)
 
+# git commit hash for reproducibility
+try:
+    git_commit = subprocess.check_output(
+        ["git", "rev-parse", "--short", "HEAD"], stderr=subprocess.DEVNULL
+    ).decode().strip()
+except Exception:
+    git_commit = "unknown"
+
+wall_start = time.time()
+
 # ============================================================
 # wandb (optional)
 # ============================================================
@@ -102,6 +114,9 @@ policy = PolicyNet(
     hidden_dims=[256, 128],
     dropout=0.1,
 ).to(device)
+
+# kNN pool homophily (computed once from pool edges + ground truth labels)
+knn_pool_homophily = env._eval_homophily_from_pool()
 
 optimizer = AdamW(policy.parameters(), lr=args.lr)
 
@@ -293,15 +308,22 @@ print(f"  best macro_f1:      {best_macro_f1:.4f}  "
       f"(delta={best_macro_f1 - env.baseline_macro_f1:+.4f})")
 print(f"  avg reward (last 50): {np.mean(episode_rewards[-50:]):.4f}")
 
+final_macro_f1, final_homophily = env.get_current_metrics()
+
 results = {
     "dataset": args.dataset,
     "split_seed": args.split_seed,
     "n_episodes": args.n_episodes,
     "beta": args.beta,
+    "git_commit": git_commit,
+    "wall_time_sec": round(time.time() - wall_start, 1),
+    "homophily_original": env.baseline_homophily,
+    "homophily_knn_pool": knn_pool_homophily,
+    "homophily_refined": final_homophily,
     "baseline_macro_f1": env.baseline_macro_f1,
-    "baseline_homophily": env.baseline_homophily,
     "best_macro_f1": best_macro_f1,
     "delta_macro_f1": best_macro_f1 - env.baseline_macro_f1,
+    "final_macro_f1": final_macro_f1,
     "episode_rewards": episode_rewards,
     "episode_macro_f1s": episode_macro_f1s,
     "episode_homophilys": episode_homophilys,
@@ -309,6 +331,16 @@ results = {
 }
 (OUT_DIR / "results.json").write_text(json.dumps(results, indent=2))
 print(f"\nresults saved to {OUT_DIR / 'results.json'}")
+
+log({
+    "final/macro_f1": final_macro_f1,
+    "final/best_macro_f1": best_macro_f1,
+    "final/homophily_original": env.baseline_homophily,
+    "final/homophily_knn_pool": knn_pool_homophily,
+    "final/homophily_refined": final_homophily,
+    "final/delta_homophily": final_homophily - env.baseline_homophily,
+    "final/wall_time_sec": round(time.time() - wall_start, 1),
+})
 
 if args.wandb:
     wandb.finish()

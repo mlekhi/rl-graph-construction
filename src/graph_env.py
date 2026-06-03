@@ -520,3 +520,21 @@ class GraphEnv:
         macro_f1, _ = self._eval_f1(self.current_edge_index)
         homophily   = self._eval_homophily(self.current_edge_index)
         return macro_f1, homophily
+
+    def _eval_homophily_from_pool(self):
+        """
+        Edge homophily of the kNN candidate pool using ground-truth labels.
+        Computed once after pool is built.
+        """
+        srcs, dsts = [], []
+        for i, neighbors in self.knn_pool.items():
+            for j in neighbors:
+                if i < j:
+                    srcs.append(i)
+                    dsts.append(j)
+        if not srcs:
+            return 0.0
+        src = torch.tensor(srcs)
+        dst = torch.tensor(dsts)
+        labels = self.y.cpu()
+        return float((labels[src] == labels[dst]).float().mean().item())
