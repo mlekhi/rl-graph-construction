@@ -16,6 +16,12 @@ import subprocess
 import time
 from pathlib import Path
 
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -31,6 +37,7 @@ from policy_net import PolicyNet
 # config
 # ============================================================
 parser = argparse.ArgumentParser()
+parser.add_argument("--config",       default=None,   help="path to yaml config file (overrides defaults, CLI overrides config)")
 parser.add_argument("--dataset",      default="Cora", choices=["Cora", "PubMed", "CiteSeer"])
 parser.add_argument("--split_seed",   type=int, default=42)
 parser.add_argument("--n_episodes",   type=int, default=500)
@@ -48,6 +55,22 @@ parser.add_argument("--smoke_test",   action="store_true",      help="run 20 epi
 parser.add_argument("--seed",         type=int, default=42)
 parser.add_argument("--wandb",        action="store_true")
 args = parser.parse_args()
+
+# load yaml config and apply as defaults (CLI args take precedence)
+if args.config:
+    if not HAS_YAML:
+        raise ImportError("pyyaml not installed. run: pip install pyyaml")
+    cfg = yaml.safe_load(Path(args.config).read_text())
+    # only set values not explicitly passed via CLI
+    cli_set = {a.dest for a in parser._actions if a.option_strings}
+    import sys
+    cli_explicitly_set = set()
+    for i, a in enumerate(sys.argv[1:]):
+        if a.startswith("--"):
+            cli_explicitly_set.add(a.lstrip("--").split("=")[0].replace("-", "_"))
+    for k, v in cfg.items():
+        if k not in cli_explicitly_set and hasattr(args, k):
+            setattr(args, k, v)
 
 if args.smoke_test:
     args.n_episodes = 20
@@ -316,6 +339,7 @@ results = {
     "n_episodes": args.n_episodes,
     "beta": args.beta,
     "git_commit": git_commit,
+    "config_file": args.config,
     "wall_time_sec": round(time.time() - wall_start, 1),
     "homophily_original": env.baseline_homophily,
     "homophily_knn_pool": knn_pool_homophily,

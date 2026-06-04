@@ -1,0 +1,15 @@
+dataset: Cora
+split_seed: 42
+beta: 0.75
+n_episodes: 500
+max_steps: 100
+reward_every: 5
+knn_k: 10
+lr: 0.0003
+gamma: 0.99
+clip_eps: 0.2
+vf_coef: 0.5
+entropy_coef: 0.05
+n_epochs: 4
+seed: 42
+wandb: true
