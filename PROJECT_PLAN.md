@@ -37,10 +37,13 @@ _thesis submission: aug 15, 2026._
 - [ ] wandb wired in: reward curves, val f1, graph homophily, action histograms
 - [ ] checkpoint: does β>0 beat β=0 in F1 or produce higher-homophily output?
 
-### week 7 (jun 10-16) -- pubmed + citeseer
-- [ ] repeat full pipeline on pubmed (β ablation)
-- [ ] citeseer run (β ablation)
-- [ ] compare β trade-off curve across datasets
+### week 7 (jun 10-16) -- multi-dataset ablation
+- [ ] freeze sage for pubmed
+- [ ] full β ablation on pubmed: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
+- [ ] full β ablation on citeseer: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
+- [ ] plot β curve for each dataset side by side
+- [ ] compare optimal β across datasets -- does it shift with homophily level?
+- [ ] note: pubmed expected to show small gains (1pp MLP-SAGE gap)
 
 ### week 8 (jun 17-23) -- final eval + learnable β
 - [ ] 10-split CI on cora, pubmed, citeseer
