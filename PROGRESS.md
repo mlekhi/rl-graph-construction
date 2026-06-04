@@ -218,10 +218,57 @@
 - beta = {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0} running in parallel tmux panes on gpu2
 - early (~17 episodes): curves still in warmup, differentiation expected after episode 100
 
+### normalized beta sweep completed — cora (seed=42, 500ep, 100 steps)
+
+| β | best macro_f1 | delta | h_refined | Δ homophily |
+|---|---|---|---|---|
+| 0.00 | 0.8794 | +0.0131 | 0.8129 | +0.0030 |
+| 0.25 | 0.8800 | +0.0137 | 0.8145 | +0.0046 |
+| 0.50 | 0.8781 | +0.0118 | 0.8132 | +0.0032 |
+| 0.75 | 0.8786 | +0.0123 | 0.8135 | +0.0036 |
+| **1.00** | **0.8816** | **+0.0153** | **0.8140** | **+0.0041** |
+| 1.50 | 0.8782 | +0.0119 | 0.8135 | +0.0035 |
+| 2.00 | 0.8776 | +0.0113 | 0.8131 | +0.0031 |
+
+- β=1.0 peaks — inverted-U confirmed (single seed)
+- all refined graphs above original homophily (0.810) and well above kNN pool (0.517)
+- beats graphsage baseline (0.866) at all β values
+
+### experiment tracking system built
+- compile_results.py — single source of truth CSV across all runs
+- configs/ — yaml file per experiment for reproducible runs
+- results.json per run: full config, 3 homophily values, git commit hash, wall time
+- wandb: live curves at wandb.ai/mlekhi-western-university/graphhare
+- β ablation curve plot generated (runs/beta_curve.png)
+
+---
+
+## 2026-06-05 — thursday meeting with fadi
+
+### meeting outcomes
+- results confirmed: β=1.0 peak, inverted-U curve shown live in wandb
+- fadi confirmed: homophily-in-reward is novel, no prior work does this
+- **venue upgrade: NeurIPS** — if learnable β + math formulation + multi-dataset ablation
+- fadi's theory confirmed by baselines: more classes = bigger GNN advantage over MLP
+  - cora (7 classes): 13pp gap
+  - citeseer (6 classes): 3pp gap  
+  - pubmed (3 classes): 1pp gap
+- fadi suggested: run β = 1.1, 1.2, 1.3 to find true peak between 1.0 and 1.5
+- fadi suggested: learnable β via NoisyNet-inspired mechanism (β as network weight)
+- fadi: will discuss math formulation at next meeting
+
+### completed after meeting
+- pubmed frozen sage: val_acc=0.902, test_acc=0.887, test_macro_f1=0.887
+- citeseer β runs (0, 0.5, 1.0): all give best_f1=0.7242 (+0.0112) — no F1 differentiation yet, homophily increases with β
+- β = 1.1, 1.2, 1.3 on cora running
+- pubmed β runs (0, 0.5, 1.0) running
+- citeseer full sweep (0.25, 0.75, 1.5, 2.0) running
+
 ### next steps
-- [ ] wait for all 7 beta runs to finish, scp results
-- [ ] build experiment tracking system (CSV per run with git commit + wall time)
-- [ ] report homophily of all 3 graphs (original, kNN pool, refined) per run
-- [ ] thursday 3pm meeting with fadi — bring cora beta curve
-- [ ] pubmed baselines + freeze sage
-- [ ] 10-seed CI at best beta
+- [ ] wait for all running experiments to finish, scp results
+- [ ] run remaining citeseer β: {0.25, 0.75, 1.5, 2.0}
+- [ ] run full pubmed β sweep: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
+- [ ] read NoisyNet paper (arxiv 1706.10295)
+- [ ] implement learnable β
+- [ ] 10-seed CI at best β on all 3 datasets
+- [ ] thursday meeting: NeurIPS math formulation discussion with fadi
