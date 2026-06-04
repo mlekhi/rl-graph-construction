@@ -42,9 +42,10 @@ _thesis submission: aug 15, 2026._
 - [ ] citeseer run (β ablation)
 - [ ] compare β trade-off curve across datasets
 
-### week 8 (jun 17-23) -- final eval
+### week 8 (jun 17-23) -- final eval + learnable β
 - [ ] 10-split CI on cora, pubmed, citeseer
 - [ ] comparison table vs graphsage baseline, mlp, graphrare (β=0 row)
+- [ ] learnable β: make β a trainable parameter (log_beta = nn.Parameter) updated via meta-optimizer on val performance -- if implemented, compare vs fixed β=1.0
 - [ ] PPG if PPO plateaued
 - [ ] episode length sweep: 20 / 50 / 100 if time allows
 
