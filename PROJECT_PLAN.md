@@ -23,19 +23,21 @@ _thesis submission: aug 15, 2026._
 - [x] smoke test passing on gpu2 (cora, 20 episodes)
 - [x] full 500-episode PPO run on cora: baseline 0.8663 → best 0.8816 (+0.0153)
 
-### week 5 (may 27 - jun 2) -- IN PROGRESS: homophily pivot
-- [ ] **homophily diagnostic**: compute edge homophily of starting graph + kNN pool for cora, pubmed, citeseer. mandatory gate before more training.
-- [ ] **update GraphEnv reward**: `gamma * delta_minority_f1` → `beta * delta_homophily`
-- [ ] **citeseer baseline**: graphsage + mlp baselines on citeseer (10 splits)
-- [ ] **β=0 run**: replicate accuracy-only baseline on cora (clean GraphRARE comparison point)
-- [ ] reply to fadi with progress update + reschedule zoom
+### week 5 (may 27 - jun 2) -- DONE: homophily pivot
+- [x] homophily diagnostic: all 3 datasets pass (cora 3.6x, pubmed 2.1x, citeseer 3.2x above random)
+- [x] update GraphEnv reward: `gamma * delta_minority_f1` → `beta * delta_homophily`
+- [x] citeseer baselines: graphsage 0.761 ± 0.009, mlp 0.728 ± 0.008
+- [x] citeseer frozen sage checkpoint (val_acc=0.779)
+- [x] reply to fadi with progress update
 
-### week 6 (jun 3-9) -- β ablation (empirical core)
-- [ ] train cora at β ∈ {0, 0.1, 0.5, 1.0, 2.0}
-- [ ] log edge homophily of final graph at each β (alongside accuracy)
-- [ ] confirm β=0 vs β>0 produce distinguishably different graphs
-- [ ] wandb wired in: reward curves, val f1, graph homophily, action histograms
-- [ ] checkpoint: does β>0 beat β=0 in F1 or produce higher-homophily output?
+### week 6 (jun 3-9) -- DONE: β ablation (empirical core)
+- [x] reward normalization (Welford online algorithm) — β is now interpretable
+- [x] full β ablation on cora: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0} — β=1.0 peaks at 0.8816
+- [x] log all 3 homophily values per run (original, kNN pool, refined)
+- [x] wandb wired in: reward curves, macro_f1, homophily, action histograms, grad norm
+- [x] β=1.0 beats β=0 (+0.0153 vs +0.0131) — inverted-U confirmed (single seed)
+- [x] experiment tracking system: config files, results_summary.csv, git commit + wall time per run
+- [x] β ablation curve plot generated
 
 ### week 7 (jun 10-16) -- multi-dataset ablation
 - [ ] freeze sage for pubmed
@@ -84,8 +86,8 @@ _thesis submission: aug 15, 2026._
 |---|---|---|
 | MLP baseline | 0.757 ± 0.012 | done |
 | GraphSAGE (default graph) | 0.879 ± 0.013 | done |
-| GraphHARE β=0 beats GraphSAGE | >0.879 | in progress |
-| GraphHARE β>0 beats β=0 | TBD | pending ablation |
+| GraphHARE β=0 beats GraphSAGE | >0.879 | ✓ 0.8794 (single seed) |
+| GraphHARE β>0 beats β=0 | TBD | ✓ β=1.0: 0.8816 vs 0.8794 (single seed, needs 10-seed CI) |
 
 ## targets (pubmed)
 
@@ -98,7 +100,9 @@ _thesis submission: aug 15, 2026._
 
 | target | value | status |
 |---|---|---|
-| MLP + GraphSAGE baselines | TBD | not run yet |
+| MLP baseline | 0.728 ± 0.008 | done |
+| GraphSAGE baseline | 0.761 ± 0.009 | done |
+| GraphHARE β ablation | TBD | pending (week 7) |
 
 ---
 
