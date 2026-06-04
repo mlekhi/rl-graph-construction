@@ -40,6 +40,10 @@ _thesis submission: aug 15, 2026._
 - [x] β ablation curve plot generated
 
 ### week 7 (jun 10-16) -- fine-tune β + multi-dataset ablation
+**thursday meeting agenda:**
+- [ ] discuss NeurIPS feasibility with fadi — which theoretical claims does he want to make?
+- [ ] ask fadi to lead/co-write the mathematical formulation section
+- [ ] confirm learnable β is in scope for the paper
 - [ ] run β = {1.1, 1.2, 1.3} on cora to find true peak between 1.0 and 1.5
 - [ ] read NoisyNet paper (noisy networks for exploration) to understand learnable β mechanism
 - [ ] freeze sage for pubmed
