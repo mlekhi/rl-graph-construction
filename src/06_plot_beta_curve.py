@@ -37,20 +37,21 @@ for path in sorted(runs_dir.rglob("results.json")):
         "beta": float(d["beta"]),
         "best_macro_f1": float(d["best_macro_f1"]),
         "homophily_refined": float(d.get("homophily_refined", 0)),
+        "baseline_macro_f1": float(d.get("baseline_macro_f1", 0.8663)),
     })
 
 rows.sort(key=lambda r: r["beta"])
 betas   = [r["beta"] for r in rows]
 f1s     = [r["best_macro_f1"] for r in rows]
 homs    = [r["homophily_refined"] for r in rows]
-baseline = 0.8663
+baseline = rows[0].get("baseline_macro_f1", 0.8663) if rows else 0.8663
 
 # ---- plot ----
 fig, ax1 = plt.subplots(figsize=(8, 5))
 
 # macro-F1 curve
 ax1.plot(betas, f1s, "o-", color="#2196F3", linewidth=2.5, markersize=8, label="Best macro-F1")
-ax1.axhline(baseline, color="gray", linestyle="--", linewidth=1.5, label=f"GraphSAGE baseline ({baseline})")
+ax1.axhline(baseline, color="gray", linestyle="--", linewidth=1.5, label=f"GraphSAGE baseline ({baseline:.4f})")
 
 # mark peak
 peak_idx = f1s.index(max(f1s))
@@ -61,14 +62,16 @@ ax1.set_xlabel("β (homophily reward weight)", fontsize=13)
 ax1.set_ylabel("Best macro-F1", fontsize=13, color="#2196F3")
 ax1.tick_params(axis="y", labelcolor="#2196F3")
 ax1.set_xticks(betas)
-ax1.set_ylim(0.875, 0.886)
+f1_range = max(f1s) - min(f1s)
+ax1.set_ylim(min(f1s) - max(f1_range * 0.5, 0.002), max(f1s) + max(f1_range * 0.5, 0.002))
 
 # homophily on second axis
 ax2 = ax1.twinx()
 ax2.plot(betas, homs, "s--", color="#4CAF50", linewidth=1.5, markersize=6, alpha=0.7, label="h_refined")
 ax2.set_ylabel("Refined graph homophily", fontsize=13, color="#4CAF50")
 ax2.tick_params(axis="y", labelcolor="#4CAF50")
-ax2.set_ylim(0.811, 0.817)
+hom_range = max(homs) - min(homs)
+ax2.set_ylim(min(homs) - max(hom_range * 0.5, 0.001), max(homs) + max(hom_range * 0.5, 0.001))
 
 # legend
 lines1, labels1 = ax1.get_legend_handles_labels()
