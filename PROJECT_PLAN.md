@@ -43,7 +43,7 @@ _thesis submission: aug 15, 2026._
 **thursday meeting agenda:**
 - [ ] discuss NeurIPS feasibility with fadi — which theoretical claims does he want to make?
 - [ ] ask fadi to lead/co-write the mathematical formulation section
-- [ ] confirm learnable β is in scope for the paper
+- [x] confirm learnable β is in scope for the paper ← CONFIRMED by fadi jun 5
 - [ ] run β = {1.1, 1.2, 1.3} on cora to find true peak between 1.0 and 1.5
 - [ ] read NoisyNet paper (noisy networks for exploration) to understand learnable β mechanism
 - [ ] freeze sage for pubmed
