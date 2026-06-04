@@ -44,13 +44,14 @@ _thesis submission: aug 15, 2026._
 - [ ] discuss NeurIPS feasibility with fadi — which theoretical claims does he want to make?
 - [ ] ask fadi to lead/co-write the mathematical formulation section
 - [x] confirm learnable β is in scope for the paper ← CONFIRMED by fadi jun 5
-- [ ] run β = {1.1, 1.2, 1.3} on cora to find true peak between 1.0 and 1.5
+- [x] run β = {1.1, 1.2, 1.3} on cora — peak at β=1.1 (0.8820, +0.0157)
 - [ ] read NoisyNet paper (noisy networks for exploration) to understand learnable β mechanism
-- [ ] freeze sage for pubmed
-- [ ] full β ablation on pubmed: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
-- [ ] full β ablation on citeseer: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
+- [x] freeze sage for pubmed (val_acc=0.902, test_macro_f1=0.887)
+- [ ] full β ablation on pubmed: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0} ← in progress
+- [ ] full β ablation on citeseer: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0} ← in progress
 - [ ] plot β curve for all 3 datasets side by side
 - [ ] test fadi's theory: more classes = bigger GNN advantage over MLP (cora 7 > citeseer 6 > pubmed 3)
+- [x] repo cleanup: scripts numbered 01-06, archive/ organized
 
 ### week 8 (jun 17-23) -- learnable β (NeurIPS upgrade)
 - [ ] implement learnable β: make β a network parameter tuned through training (NoisyNet-inspired)

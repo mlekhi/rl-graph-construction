@@ -264,10 +264,30 @@
 - pubmed β runs (0, 0.5, 1.0) running
 - citeseer full sweep (0.25, 0.75, 1.5, 2.0) running
 
+### cora fine-tuning results (β = 1.1, 1.2, 1.3)
+
+| β | best macro_f1 | delta | h_refined |
+|---|---|---|---|
+| 1.1 | **0.8820** | **+0.0157** | 0.8123 |
+| 1.2 | **0.8820** | **+0.0157** | 0.8131 |
+| 1.3 | 0.8799 | +0.0136 | 0.8142 |
+
+- true peak is β=1.1 (tied with 1.2 on single seed)
+- β=1.1 beats β=1.0 by +0.0004 — argues for learnable β to find exact optimum
+- β ablation curve regenerated: runs/beta_curve_cora_full.png
+
+### repo cleanup
+- scripts renamed by pipeline order: 01_baseline_planetoid.py through 06_plot_beta_curve.py
+- RESEARCH_HANDOVER.md moved to archive/
+- configs/ yaml files for all cora β values
+
+### currently running on gpu2
+- citeseer β: {0.25, 0.75, 1.5, 2.0}
+- pubmed β: {0, 0.5, 1.0} + {0.25, 0.75, 1.5, 2.0} queued
+
 ### next steps
-- [ ] wait for all running experiments to finish, scp results
-- [ ] run remaining citeseer β: {0.25, 0.75, 1.5, 2.0}
-- [ ] run full pubmed β sweep: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
+- [ ] scp citeseer + pubmed results when done
+- [ ] plot β curves for citeseer and pubmed
 - [ ] read NoisyNet paper (arxiv 1706.10295)
 - [ ] implement learnable β
 - [ ] 10-seed CI at best β on all 3 datasets
