@@ -20,7 +20,8 @@ ROOT = Path(__file__).parent.parent
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--runs_dir", default="runs/rl_cora_normalized2")
-parser.add_argument("--out", default="runs/beta_curve.png")
+parser.add_argument("--dataset", default="Cora", help="dataset name for plot title and filename")
+parser.add_argument("--out", default=None, help="output path (default: runs/beta_curve_{dataset}.png)")
 args = parser.parse_args()
 
 # collect results
@@ -74,10 +75,10 @@ lines1, labels1 = ax1.get_legend_handles_labels()
 lines2, labels2 = ax2.get_legend_handles_labels()
 ax1.legend(lines1 + lines2, labels1 + labels2, loc="lower right", fontsize=10)
 
-plt.title("GraphHARE β Ablation — Cora (seed=42, normalized reward)", fontsize=13, fontweight="bold")
+plt.title(f"GraphHARE β Ablation — {args.dataset} (seed=42, normalized reward)", fontsize=13, fontweight="bold")
 plt.tight_layout()
 
-out_path = ROOT / args.out
+out_path = ROOT / (args.out or f"runs/beta_curve_{args.dataset.lower()}.png")
 out_path.parent.mkdir(parents=True, exist_ok=True)
 plt.savefig(out_path, dpi=150, bbox_inches="tight")
 print(f"saved to {out_path}")
