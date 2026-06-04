@@ -1,6 +1,6 @@
 # project plan -- GraphHARE
 _updated: 2026-05-28._
-_conference submission: IEEE BigData or IJCNN (venue locked ~week 9 based on results)._
+_target venue: NeurIPS (with learnable β + multi-dataset ablation + math formulation) or IEEE BigData/IJCNN as fallback._
 _thesis submission: aug 15, 2026._
 
 ---
@@ -39,20 +39,22 @@ _thesis submission: aug 15, 2026._
 - [x] experiment tracking system: config files, results_summary.csv, git commit + wall time per run
 - [x] β ablation curve plot generated
 
-### week 7 (jun 10-16) -- multi-dataset ablation
+### week 7 (jun 10-16) -- fine-tune β + multi-dataset ablation
+- [ ] run β = {1.1, 1.2, 1.3} on cora to find true peak between 1.0 and 1.5
+- [ ] read NoisyNet paper (noisy networks for exploration) to understand learnable β mechanism
 - [ ] freeze sage for pubmed
 - [ ] full β ablation on pubmed: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
 - [ ] full β ablation on citeseer: {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0}
-- [ ] plot β curve for each dataset side by side
-- [ ] compare optimal β across datasets -- does it shift with homophily level?
-- [ ] note: pubmed expected to show small gains (1pp MLP-SAGE gap)
+- [ ] plot β curve for all 3 datasets side by side
+- [ ] test fadi's theory: more classes = bigger GNN advantage over MLP (cora 7 > citeseer 6 > pubmed 3)
 
-### week 8 (jun 17-23) -- final eval + learnable β
-- [ ] 10-split CI on cora, pubmed, citeseer
+### week 8 (jun 17-23) -- learnable β (NeurIPS upgrade)
+- [ ] implement learnable β: make β a network parameter tuned through training (NoisyNet-inspired)
+- [ ] compare learnable β vs fixed β=1.0 on cora
+- [ ] mathematical formulation of homophily-aware reward with learnable β
+- [ ] 10-seed CI on cora, pubmed, citeseer at best β
 - [ ] comparison table vs graphsage baseline, mlp, graphrare (β=0 row)
-- [ ] learnable β: make β a trainable parameter (log_beta = nn.Parameter) updated via meta-optimizer on val performance -- if implemented, compare vs fixed β=1.0
 - [ ] PPG if PPO plateaued
-- [ ] episode length sweep: 20 / 50 / 100 if time allows
 
 ### weeks 9-10 (jun 24 - jul 7) -- buffer + wrap-up
 - lock conference venue based on results
