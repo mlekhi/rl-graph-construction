@@ -106,7 +106,7 @@ macro-F1
 
 ## Experiment Tracking System
 
-Per Fadi's request, every run now produces:
+Every run now produces:
 - **results.json**: full config, all metrics, 3 homophily values, git commit hash, wall time
 - **wandb**: live curves at wandb.ai/mlekhi-western-university/graphhare
 - **configs/**: yaml file per experiment (reproducible re-runs)
