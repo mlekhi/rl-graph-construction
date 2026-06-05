@@ -77,7 +77,10 @@ if args.smoke_test:
     args.n_episodes = 20
 
 ROOT    = Path(__file__).parent.parent
-OUT_DIR = ROOT / "runs" / f"rl_{args.dataset.lower()}" / f"ppo_seed{args.split_seed}_beta{args.beta}"
+if args.learnable_beta:
+    OUT_DIR = ROOT / "runs" / f"rl_{args.dataset.lower()}" / f"ppo_seed{args.split_seed}_learnable_beta"
+else:
+    OUT_DIR = ROOT / "runs" / f"rl_{args.dataset.lower()}" / f"ppo_seed{args.split_seed}_beta{args.beta}"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 device = (
