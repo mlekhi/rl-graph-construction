@@ -53,10 +53,12 @@ _thesis submission: aug 15, 2026._
 - [x] fadi's theory confirmed: cora (7 classes) clear peak, citeseer (6) flat, pubmed (3) minimal gain
 - [x] repo cleanup: scripts numbered 01-06, archive/ organized
 
-### week 8 (jun 17-23) -- learnable β (NeurIPS upgrade)
-- [ ] implement learnable β: make β a network parameter tuned through training (NoisyNet-inspired)
-- [ ] compare learnable β vs fixed β=1.0 on cora
-- [ ] mathematical formulation of homophily-aware reward with learnable β
+### week 8 (jun 17-23) -- learnable β results + final eval
+- [x] implement learnable β (NoisyNet-inspired, log_beta as nn.Parameter)
+- [x] smoke test passing: β decays from 1.0 → 0.49 in 20 episodes on cora
+- [ ] full learnable β runs: cora, citeseer, pubmed ← running now
+- [ ] compare learned β vs manual sweep peak (cora: manual=1.1, learned=?)
+- [ ] mathematical formulation of homophily-aware reward with learnable β (with fadi)
 - [ ] 10-seed CI on cora, pubmed, citeseer at best β
 - [ ] comparison table vs graphsage baseline, mlp, graphrare (β=0 row)
 - [ ] PPG if PPO plateaued

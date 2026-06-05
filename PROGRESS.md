@@ -295,8 +295,32 @@
 - β curves generated: runs/beta_curve_{cora,citeseer,pubmed}.png
 - combined 3-panel plot: runs/beta_curve_all_datasets.png
 
+---
+
+## 2026-06-09
+
+### learnable β implemented
+- `log_beta = nn.Parameter` added to PolicyNet — β = exp(log_beta), always positive
+- initialized to beta_init (default 1.0), gets gradients through value loss
+- RolloutBuffer now stores norm_delta_f1 and norm_delta_hom separately
+- PPO update recomputes returns with current β each epoch (differentiable path)
+- wandb logs β value per episode so convergence is visible
+- results.json saves `learned_beta_final`
+- flag: `--learnable_beta` (backward compatible, fixed β still works as before)
+
+### learnable β smoke test — cora (20 episodes)
+- β started at 1.0, decayed to ~0.49 in 20 episodes
+- best macro_f1 = 0.8720 (+0.0057)
+- wandb run: Cora-learnablebeta-seed42
+- β decaying toward 0.5 suggests the network prefers less homophily weighting early
+
+### currently running on gpu2
+- Cora learnable β: 500 episodes
+- CiteSeer learnable β: 500 episodes
+- PubMed learnable β: 500 episodes
+
 ### next steps
-- [ ] implement learnable β (NoisyNet-inspired)
+- [ ] scp all 3 learnable β results when done
+- [ ] compare learned β values vs manual sweep peaks
 - [ ] 10-seed CI at best β on all 3 datasets
-- [ ] update progress + plan after learnable β implemented
-- [ ] thursday meeting: NeurIPS math formulation discussion with fadi
+- [ ] thursday meeting: NeurIPS math formulation + learnable β results with fadi
