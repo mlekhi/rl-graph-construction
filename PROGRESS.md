@@ -281,14 +281,22 @@
 - RESEARCH_HANDOVER.md moved to archive/
 - configs/ yaml files for all cora β values
 
-### currently running on gpu2
-- citeseer β: {0.25, 0.75, 1.5, 2.0}
-- pubmed β: {0, 0.5, 1.0} + {0.25, 0.75, 1.5, 2.0} queued
+### multi-dataset β ablation — completed (seed=42)
+
+| dataset | classes | best β | best macro_f1 | delta | story |
+|---|---|---|---|---|---|
+| cora | 7 | 1.1 | 0.8820 | +0.0157 | clear inverted-U, β matters |
+| citeseer | 6 | flat | 0.7242 | +0.0112 | β doesn't differentiate F1 |
+| pubmed | 3 | flat | 0.8865 | +0.0019 | graph redundant, controlled case |
+
+- validates fadi's class-count theory: more classes = bigger β effect
+- citeseer flat F1 likely due to small policy_val (334 nodes, 6 classes = quantized metric)
+- pubmed tiny gains expected — 1pp MLP-SAGE gap, graph adds almost nothing
+- β curves generated: runs/beta_curve_{cora,citeseer,pubmed}.png
+- combined 3-panel plot: runs/beta_curve_all_datasets.png
 
 ### next steps
-- [ ] scp citeseer + pubmed results when done
-- [ ] plot β curves for citeseer and pubmed
-- [ ] read NoisyNet paper (arxiv 1706.10295)
-- [ ] implement learnable β
+- [ ] implement learnable β (NoisyNet-inspired)
 - [ ] 10-seed CI at best β on all 3 datasets
+- [ ] update progress + plan after learnable β implemented
 - [ ] thursday meeting: NeurIPS math formulation discussion with fadi
