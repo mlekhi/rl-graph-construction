@@ -246,6 +246,8 @@ class GraphEnv:
 
         # compute reward every reward_every steps
         reward = 0.0
+        norm_f1_out = 0.0
+        norm_hom_out = 0.0
         if self.step_count % self.reward_every == 0:
             mf1, _    = self._eval_f1(self.current_edge_index)
             homophily = self._eval_homophily(self.current_edge_index)
@@ -254,6 +256,7 @@ class GraphEnv:
             # update running stats then normalize
             self._update_norm_stats(delta_f1, delta_hom)
             norm_f1, norm_hom = self._normalize(delta_f1, delta_hom)
+            norm_f1_out, norm_hom_out = norm_f1, norm_hom
             raw_reward = norm_f1 + self.beta * norm_hom
             # EMA smoothing
             self.ema_reward = (
@@ -268,6 +271,8 @@ class GraphEnv:
             "step": self.step_count,
             "valid_action": valid,
             "num_edges": self.current_edge_index.size(1),
+            "norm_delta_f1": norm_f1_out,
+            "norm_delta_hom": norm_hom_out,
         }
         return self._get_node_states(), reward, self.done, info
 

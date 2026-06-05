@@ -10,7 +10,13 @@ Input per candidate edge (node_i, node_j, op):
 Output:
     scalar logit -> sigmoid -> probability of taking this action
 
-Also includes a value head for PPG (critic).
+Also includes a value head (critic) and optionally a learnable beta parameter.
+
+Learnable beta (NoisyNet-inspired):
+    log_beta = nn.Parameter -- learned alongside policy weights
+    beta = exp(log_beta) -- always positive
+    reward = norm_delta_f1 + beta * norm_delta_homophily
+    beta gets gradients through the value loss (returns depend on beta)
 """
 
 import torch
@@ -32,9 +38,12 @@ class PolicyNet(nn.Module):
         edge_state_dim: int,
         hidden_dims: list = [256, 128],
         dropout: float = 0.1,
+        learnable_beta: bool = False,
+        beta_init: float = 1.0,
     ):
         super().__init__()
         self.edge_state_dim = edge_state_dim
+        self.learnable_beta = learnable_beta
 
         # shared trunk
         layers = []
@@ -49,6 +58,14 @@ class PolicyNet(nn.Module):
 
         # critic head: outputs scalar value from mean pooled trunk output
         self.critic_head = nn.Linear(in_dim, 1)
+
+        # learnable beta: log_beta is a scalar parameter, beta = exp(log_beta)
+        # initialized so beta starts at beta_init
+        if learnable_beta:
+            import math
+            self.log_beta = nn.Parameter(torch.tensor(math.log(beta_init)))
+        else:
+            self.log_beta = None
 
         self._init_weights()
 
@@ -71,6 +88,13 @@ class PolicyNet(nn.Module):
         action_logits = self.actor_head(x).squeeze(-1)   # (N,)
         value = self.critic_head(x.mean(dim=0)).squeeze() # scalar (mean pool)
         return action_logits, value
+
+    @property
+    def beta(self):
+        """Current beta value. Learnable if log_beta is a parameter, else None."""
+        if self.log_beta is not None:
+            return self.log_beta.exp()
+        return None
 
     def get_action_dist(self, edge_states: torch.Tensor):
         """

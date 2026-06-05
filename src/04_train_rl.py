@@ -43,7 +43,8 @@ parser.add_argument("--split_seed",   type=int, default=42)
 parser.add_argument("--n_episodes",   type=int, default=500)
 parser.add_argument("--max_steps",    type=int, default=50)
 parser.add_argument("--reward_every", type=int, default=5)
-parser.add_argument("--beta",         type=float, default=0.5,  help="homophily reward weight (0=accuracy-only)")
+parser.add_argument("--beta",         type=float, default=0.5,  help="homophily reward weight (0=accuracy-only, ignored if --learnable_beta)")
+parser.add_argument("--learnable_beta", action="store_true",   help="make beta a learnable network parameter")
 parser.add_argument("--knn_k",        type=int, default=10)
 parser.add_argument("--lr",           type=float, default=3e-4)
 parser.add_argument("--gamma",        type=float, default=0.99, help="discount factor")
@@ -109,11 +110,14 @@ wall_start = time.time()
 # ============================================================
 if args.wandb:
     import wandb
+    run_name = (f"{args.dataset}-learnablebeta-seed{args.split_seed}"
+                if args.learnable_beta else
+                f"{args.dataset}-beta{args.beta}-seed{args.split_seed}")
     wandb.init(
         project="graphhare",
-        name=f"{args.dataset}-beta{args.beta}-seed{args.split_seed}",
+        name=run_name,
         config=vars(args),
-        tags=[args.dataset, f"beta{args.beta}"],
+        tags=[args.dataset, "learnable_beta" if args.learnable_beta else f"beta{args.beta}"],
     )
     log = wandb.log
 else:
@@ -136,6 +140,8 @@ policy = PolicyNet(
     edge_state_dim=env.edge_state_dim,
     hidden_dims=[256, 128],
     dropout=0.1,
+    learnable_beta=args.learnable_beta,
+    beta_init=args.beta,
 ).to(device)
 
 # kNN pool homophily (computed once from pool edges + ground truth labels)
@@ -146,6 +152,8 @@ optimizer = AdamW(policy.parameters(), lr=args.lr)
 print(f"\nPPO training | {args.dataset} | {args.n_episodes} episodes | "
       f"max_steps={args.max_steps} | device={device}")
 print(f"policy params: {sum(p.numel() for p in policy.parameters()):,}")
+if args.learnable_beta:
+    print(f"learnable beta: enabled (init={args.beta})")
 
 # ============================================================
 # rollout buffer
@@ -154,32 +162,59 @@ class RolloutBuffer:
     """
     Stores one episode. Per step we keep the full candidate set so we can
     recompute log_probs from the same categorical distribution during update.
-    With node-first selection each step has ~10-25 candidates × 151 dims — tiny.
+
+    For learnable beta: stores normalized (delta_f1, delta_hom) separately so
+    rewards can be recomputed with the current beta during the PPO update,
+    allowing beta to receive gradients through the value loss.
     """
     def __init__(self):
-        self.all_states  = []   # list of (N_cands, edge_state_dim) tensors
-        self.action_idxs = []   # int index into all_states[t]
-        self.log_probs   = []   # scalar, log_prob of chosen action
-        self.rewards     = []   # float
-        self.values      = []   # scalar critic estimate
+        self.all_states    = []   # list of (N_cands, edge_state_dim) tensors
+        self.action_idxs   = []   # int index into all_states[t]
+        self.log_probs     = []   # scalar, log_prob of chosen action
+        self.rewards       = []   # float (combined reward, for fixed beta)
+        self.norm_delta_f1s  = []  # normalized delta_f1 per reward step
+        self.norm_delta_homs = []  # normalized delta_hom per reward step
+        self.values        = []   # scalar critic estimate
 
     def clear(self):
         self.__init__()
 
-    def add(self, all_states, action_idx, log_prob, reward, value):
-        self.all_states.append(all_states)   # keep on cpu to save GPU mem
+    def add(self, all_states, action_idx, log_prob, reward, value,
+            norm_delta_f1=0.0, norm_delta_hom=0.0):
+        self.all_states.append(all_states)
         self.action_idxs.append(action_idx)
         self.log_probs.append(log_prob)
         self.rewards.append(reward)
+        self.norm_delta_f1s.append(norm_delta_f1)
+        self.norm_delta_homs.append(norm_delta_hom)
         self.values.append(value)
 
-    def compute_returns(self):
-        """Discounted returns (no bootstrapping — episode ends naturally)."""
-        returns, R = [], 0.0
-        for r in reversed(self.rewards):
-            R = r + args.gamma * R
-            returns.insert(0, R)
-        return torch.tensor(returns, dtype=torch.float32, device=device)
+    def compute_returns(self, beta=None):
+        """
+        Discounted returns. If beta is a tensor (learnable), recomputes rewards
+        from raw deltas so beta gets gradients. Otherwise uses stored rewards.
+        """
+        if beta is not None and len(self.norm_delta_f1s) > 0:
+            # recompute rewards with current learnable beta (differentiable)
+            rewards = [df1 + beta * dhom
+                       for df1, dhom in zip(self.norm_delta_f1s, self.norm_delta_homs)]
+        else:
+            rewards = self.rewards
+
+        if beta is not None:
+            # differentiable path — keep as tensor list
+            result = []
+            R = torch.tensor(0.0, device=device)
+            for r in reversed(rewards):
+                R = r + args.gamma * R
+                result.insert(0, R)
+            return torch.stack(result)
+        else:
+            result, R = [], 0.0
+            for r in reversed(rewards):
+                R = r + args.gamma * R
+                result.insert(0, R)
+            return torch.tensor(result, dtype=torch.float32, device=device)
 
 
 buffer = RolloutBuffer()
@@ -230,11 +265,13 @@ for episode in range(1, args.n_episodes + 1):
             ep_removes += 1
 
         buffer.add(
-            all_states=all_states,         # cpu tensor
-            action_idx=action_idx.item(),  # int
-            log_prob=log_prob.item(),      # float
+            all_states=all_states,
+            action_idx=action_idx.item(),
+            log_prob=log_prob.item(),
             reward=reward,
             value=value.item(),
+            norm_delta_f1=info.get("norm_delta_f1", 0.0),
+            norm_delta_hom=info.get("norm_delta_hom", 0.0),
         )
 
         if done:
@@ -244,12 +281,8 @@ for episode in range(1, args.n_episodes + 1):
     if T == 0:
         continue
 
-    returns    = buffer.compute_returns()                              # (T,)
-    old_lp_t   = torch.tensor(buffer.log_probs, dtype=torch.float32, device=device)  # (T,)
-    values_t   = torch.tensor(buffer.values,    dtype=torch.float32, device=device)  # (T,)
-
-    advantages = returns - values_t
-    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+    old_lp_t = torch.tensor(buffer.log_probs, dtype=torch.float32, device=device)
+    values_t = torch.tensor(buffer.values,    dtype=torch.float32, device=device)
 
     # ---- PPO update ----
     policy.train()
@@ -265,9 +298,15 @@ for episode in range(1, args.n_episodes + 1):
             new_val_list.append(val_t)
             ent_list.append(dist_t.entropy())
 
-        new_lp  = torch.stack(new_lp_list)    # (T,)
-        new_val = torch.stack(new_val_list)   # (T,)
+        new_lp  = torch.stack(new_lp_list)
+        new_val = torch.stack(new_val_list)
         entropy = torch.stack(ent_list).mean()
+
+        # recompute returns with current beta (differentiable if learnable)
+        beta_val = policy.beta if args.learnable_beta else None
+        returns  = buffer.compute_returns(beta=beta_val)
+        advantages = (returns - values_t).detach()
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         ratio     = (new_lp - old_lp_t).exp()
         loss_clip = -torch.min(
@@ -292,7 +331,7 @@ for episode in range(1, args.n_episodes + 1):
     delta_macro     = macro_f1  - env.baseline_macro_f1
     delta_homophily = homophily - env.baseline_homophily
 
-    log({
+    log_dict = {
         "episode": episode,
         "reward": ep_reward,
         "macro_f1": macro_f1,
@@ -308,7 +347,10 @@ for episode in range(1, args.n_episodes + 1):
         "loss/value": loss_val.item(),
         "loss/entropy": entropy.item(),
         "grad_norm": grad_norm.item(),
-    })
+    }
+    if args.learnable_beta:
+        log_dict["beta"] = policy.beta.item()
+    log(log_dict)
 
     if macro_f1 > best_macro_f1:
         best_macro_f1 = macro_f1
@@ -338,6 +380,8 @@ results = {
     "split_seed": args.split_seed,
     "n_episodes": args.n_episodes,
     "beta": args.beta,
+    "learnable_beta": args.learnable_beta,
+    "learned_beta_final": policy.beta.item() if args.learnable_beta else None,
     "git_commit": git_commit,
     "config_file": args.config,
     "wall_time_sec": round(time.time() - wall_start, 1),
