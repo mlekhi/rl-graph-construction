@@ -156,7 +156,7 @@ Week 8:
   comparison table vs GraphSAGE, MLP, GraphRARE (beta=0)
 
 Writing:
-  math formulation (with Prof. AlMahamid)
+  math formulation (with fadi)
   methodology, results, ablation section
   target: NeurIPS
 ```
