@@ -7,7 +7,7 @@
 - added `.gitignore` excluding large binary artifacts: `cache/`, `preprocessed/*.npy`, `runs/*/model_outputs/`, `data/`
 - committed: notebooks, handover doc, data splits, best params json, k-sweep metrics/plots, metadata
 
-### baseline summary (inherited from fadi)
+### baseline summary (inherited from Prof. AlMahamid)
 - pipeline: bert-base-uncased (frozen, mean pool) → pca(128) → z-score → smote → knn graph (K=15, cosine, inductive_directed) → graphsage
 - test accuracy: **0.6823 ± 0.0022** (10 seeds)
 - test macro-f1: **0.6856 ± 0.0021**
@@ -22,14 +22,14 @@
 ### plan: 4-way split refactor (prerequisite for RL)
 - original split: 60% train / 20% val / 20% test
 - new split: 60% train / 10% sage_val / 10% policy_val / 20% test
-- rationale: if SAGE early-stops on val AND RL is rewarded on val, that's double-dipping (reward hacking). separate splits prevent this. test stays at 20% for comparability with fadi's baseline.
+- rationale: if SAGE early-stops on val AND RL is rewarded on val, that's double-dipping (reward hacking). separate splits prevent this. test stays at 20% for comparability with Prof. AlMahamid's baseline.
 
 ---
 
 ## 2026-05-06
 
 ### environment setup
-- notebook was pinned to fadi's kernel `sentiment-rl-graph` (didn't exist locally)
+- notebook was pinned to Prof. AlMahamid's kernel `sentiment-rl-graph` (didn't exist locally)
 - registered new kernel: `python3.11 -m ipykernel install --user --name sentiment-rl-graph`
 - installed missing deps on python3.11: scikit-learn, imbalanced-learn, torch-geometric, optuna, seaborn, matplotlib
 
@@ -61,7 +61,7 @@
 
 ## 2026-05-12
 
-### dataset pivot: cora + pubmed (fadi's instruction)
+### dataset pivot: cora + pubmed (Prof. AlMahamid's instruction)
 - sentiment MLP already competitive with graphsage (~0.689 vs 0.686) — no headroom
 - new primary: cora + pubmed + citeseer
 - deprecated: sentiment pipeline, preprocessing notebooks as primary
@@ -76,7 +76,7 @@
 | pubmed | MLP | 0.876 ± 0.003 | 0.874 ± 0.004 |
 
 - cora gap: ~12pp — strong RL headroom
-- pubmed gap: ~1pp — small, expected behavior per fadi (frame as "graph redundant" case)
+- pubmed gap: ~1pp — small, expected behavior per Prof. AlMahamid (frame as "graph redundant" case)
 
 ---
 
@@ -122,7 +122,7 @@
 
 ## 2026-05-27 to 2026-05-29 (week 5)
 
-### fadi's revised RL_DESIGN.md received and merged
+### Prof. AlMahamid's revised RL_DESIGN.md received and merged
 - method renamed: **GraphHARE** (Homophily-Aware Reward for Edges)
 - single contribution: homophily-aware reward `r_t = delta_macro_f1 + beta * delta_homophily`
 - drops minority class F1 bonus
@@ -131,7 +131,7 @@
 - beta ablation is the empirical core
 
 ### homophily diagnostic (`src/homophily_diagnostic.py`)
-- mandatory pre-training gate per fadi's design doc
+- mandatory pre-training gate per Prof. AlMahamid's design doc
 - all 3 datasets pass:
 
 | dataset | h_original | h_knn_pool | random_base | ratio |
@@ -174,7 +174,7 @@
 
 ---
 
-## 2026-05-29 — fadi feedback (email)
+## 2026-05-29 — Prof. AlMahamid feedback (email)
 
 ### key technical changes required
 1. **normalize reward terms** before beta sweep — delta_F1 and delta_homophily must be on comparable scale so beta means something. without this beta values are just raw magnitude ratios
@@ -182,7 +182,7 @@
 3. **homophily reporting**: all three reference points — original graph, kNN pool, refined graph. primary comparison: kNN pool vs refined graph
 4. **experiment tracking system**: structured CSV/JSON per run with full config, metrics, git commit, wall time. single source of truth for paper tables
 
-### fadi's dataset framing notes
+### Prof. AlMahamid's dataset framing notes
 - more classes = more room for GNN to contribute over MLP (cora 7 classes > pubmed 3 classes)
 - pubmed likely can't beat MLP or only marginally — frame as "controlled case where graph is redundant," not a weak result
 - cora and citeseer are the primary contribution datasets
@@ -193,7 +193,7 @@
 - [ ] re-run full beta sweep {0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0} on cora with normalized reward
 - [ ] run pubmed baselines + freeze sage for pubmed
 - [ ] 10-seed CI runs at best beta on cora, citeseer, pubmed
-- [ ] thursday 3pm meeting with fadi — bring cora beta curve
+- [ ] thursday 3pm meeting with Prof. AlMahamid — bring cora beta curve
 
 ---
 
@@ -243,19 +243,19 @@
 
 ---
 
-## 2026-06-05 — thursday meeting with fadi
+## 2026-06-05 — thursday meeting with Prof. AlMahamid
 
 ### meeting outcomes
 - results confirmed: β=1.0 peak, inverted-U curve shown live in wandb
-- fadi confirmed: homophily-in-reward is novel, no prior work does this
+- Prof. AlMahamid confirmed: homophily-in-reward is novel, no prior work does this
 - **venue upgrade: NeurIPS** — if learnable β + math formulation + multi-dataset ablation
-- fadi's theory confirmed by baselines: more classes = bigger GNN advantage over MLP
+- Prof. AlMahamid's theory confirmed by baselines: more classes = bigger GNN advantage over MLP
   - cora (7 classes): 13pp gap
   - citeseer (6 classes): 3pp gap  
   - pubmed (3 classes): 1pp gap
-- fadi suggested: run β = 1.1, 1.2, 1.3 to find true peak between 1.0 and 1.5
-- fadi suggested: learnable β via NoisyNet-inspired mechanism (β as network weight)
-- fadi: will discuss math formulation at next meeting
+- Prof. AlMahamid suggested: run β = 1.1, 1.2, 1.3 to find true peak between 1.0 and 1.5
+- Prof. AlMahamid suggested: learnable β via NoisyNet-inspired mechanism (β as network weight)
+- Prof. AlMahamid: will discuss math formulation at next meeting
 
 ### completed after meeting
 - pubmed frozen sage: val_acc=0.902, test_acc=0.887, test_macro_f1=0.887
@@ -289,7 +289,7 @@
 | citeseer | 6 | flat | 0.7242 | +0.0112 | β doesn't differentiate F1 |
 | pubmed | 3 | flat | 0.8865 | +0.0019 | graph redundant, controlled case |
 
-- validates fadi's class-count theory: more classes = bigger β effect
+- validates Prof. AlMahamid's class-count theory: more classes = bigger β effect
 - citeseer flat F1 likely due to small policy_val (334 nodes, 6 classes = quantized metric)
 - pubmed tiny gains expected — 1pp MLP-SAGE gap, graph adds almost nothing
 - β curves generated: runs/beta_curve_{cora,citeseer,pubmed}.png
@@ -323,4 +323,4 @@
 - [ ] scp all 3 learnable β results when done
 - [ ] compare learned β values vs manual sweep peaks
 - [ ] 10-seed CI at best β on all 3 datasets
-- [ ] thursday meeting: NeurIPS math formulation + learnable β results with fadi
+- [ ] thursday meeting: NeurIPS math formulation + learnable β results with Prof. AlMahamid

@@ -13,7 +13,7 @@ _thesis submission: aug 15, 2026._
 - [x] graphrare paper read + notes
 - [x] dataset pivot to cora / pubmed
 - [x] graphsage + mlp baselines on cora and pubmed (gpu2)
-- [x] RL_DESIGN.md written and updated with fadi's revisions
+- [x] RL_DESIGN.md written and updated with Prof. AlMahamid's revisions
 
 ### week 3-4 (may 13-26) -- DONE
 - [x] `GraphEnv` class: wraps frozen graphsage, manages graph state, applies edge edits
@@ -28,7 +28,7 @@ _thesis submission: aug 15, 2026._
 - [x] update GraphEnv reward: `gamma * delta_minority_f1` → `beta * delta_homophily`
 - [x] citeseer baselines: graphsage 0.761 ± 0.009, mlp 0.728 ± 0.008
 - [x] citeseer frozen sage checkpoint (val_acc=0.779)
-- [x] reply to fadi with progress update
+- [x] reply to Prof. AlMahamid with progress update
 
 ### week 6 (jun 3-9) -- DONE: β ablation (empirical core)
 - [x] reward normalization (Welford online algorithm) — β is now interpretable
@@ -41,16 +41,16 @@ _thesis submission: aug 15, 2026._
 
 ### week 7 (jun 10-16) -- fine-tune β + multi-dataset ablation
 **thursday meeting agenda:**
-- [ ] discuss NeurIPS feasibility with fadi — which theoretical claims does he want to make?
+- [ ] discuss NeurIPS feasibility with Prof. AlMahamid — which theoretical claims does he want to make?
 - [ ] ask fadi to lead/co-write the mathematical formulation section
-- [x] confirm learnable β is in scope for the paper ← CONFIRMED by fadi jun 5
+- [x] confirm learnable β is in scope for the paper ← CONFIRMED by Prof. AlMahamid jun 5
 - [x] run β = {1.1, 1.2, 1.3} on cora — peak at β=1.1 (0.8820, +0.0157)
 - [x] read NoisyNet paper (noisy networks for exploration)
 - [x] freeze sage for pubmed (val_acc=0.902, test_macro_f1=0.887)
 - [x] full β ablation on pubmed: flat curve, +0.002, graph redundant as expected
 - [x] full β ablation on citeseer: flat F1, +0.011, β doesn't differentiate
 - [x] plot β curve for all 3 datasets side by side (runs/beta_curve_all_datasets.png)
-- [x] fadi's theory confirmed: cora (7 classes) clear peak, citeseer (6) flat, pubmed (3) minimal gain
+- [x] Prof. AlMahamid's theory confirmed: cora (7 classes) clear peak, citeseer (6) flat, pubmed (3) minimal gain
 - [x] repo cleanup: scripts numbered 01-06, archive/ organized
 
 ### week 8 (jun 17-23) -- learnable β results + final eval
@@ -58,7 +58,7 @@ _thesis submission: aug 15, 2026._
 - [x] smoke test passing: β decays from 1.0 → 0.49 in 20 episodes on cora
 - [ ] full learnable β runs: cora, citeseer, pubmed ← running now
 - [ ] compare learned β vs manual sweep peak (cora: manual=1.1, learned=?)
-- [ ] mathematical formulation of homophily-aware reward with learnable β (with fadi)
+- [ ] mathematical formulation of homophily-aware reward with learnable β (with Prof. AlMahamid)
 - [ ] 10-seed CI on cora, pubmed, citeseer at best β
 - [ ] comparison table vs graphsage baseline, mlp, graphrare (β=0 row)
 - [ ] PPG if PPO plateaued
@@ -77,10 +77,10 @@ _thesis submission: aug 15, 2026._
 ### week 13 (jul 22-28) -- writing block 2 + fadi review
 - [ ] intro + conclusion
 - [ ] figures and tables finalized
-- [ ] **full draft to fadi by jul 25**
+- [ ] **full draft to Prof. AlMahamid by jul 25**
 
 ### jul 29 - aug 8 -- revisions
-- [ ] revisions from fadi feedback
+- [ ] revisions from Prof. AlMahamid feedback
 - [ ] final proofread
 - [ ] conference submission (venue TBD)
 
