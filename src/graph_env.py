@@ -171,14 +171,15 @@ class GraphEnv:
         _, idx = nn_model.kneighbors(x_np)
 
         # knn_pool[i] = list of candidate neighbor indices (not already in original graph)
-        self.knn_pool = {}
+        self._knn_pool_original = {}
         for i in range(self.num_nodes):
             neighbors = idx[i, 1:]  # skip self
             candidates = [
                 int(j) for j in neighbors
                 if frozenset([i, j]) not in self.original_edges_set and i != j
             ]
-            self.knn_pool[i] = candidates
+            self._knn_pool_original[i] = candidates
+        self.knn_pool = {k: list(v) for k, v in self._knn_pool_original.items()}
 
     def _compute_baseline(self):
         """F1 and homophily on original graph -- reward deltas are relative to these."""
@@ -224,6 +225,7 @@ class GraphEnv:
     def reset(self):
         """Start new episode from original graph."""
         self.current_edge_index = self.original_edge_index.clone().to(self.device)
+        self.knn_pool = {k: list(v) for k, v in self._knn_pool_original.items()}
         self.step_count  = 0
         self.done        = False
         self.ema_reward  = 0.0
