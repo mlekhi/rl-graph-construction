@@ -45,6 +45,7 @@ parser.add_argument("--max_steps",    type=int, default=50)
 parser.add_argument("--reward_every", type=int, default=5)
 parser.add_argument("--beta",         type=float, default=0.5,  help="homophily reward weight (0=accuracy-only, ignored if --learnable_beta)")
 parser.add_argument("--learnable_beta", action="store_true",   help="make beta a learnable network parameter")
+parser.add_argument("--run_tag",      type=str, default="",    help="optional tag appended to run name and output dir (e.g. knnfix)")
 parser.add_argument("--knn_k",        type=int, default=10)
 parser.add_argument("--lr",           type=float, default=3e-4)
 parser.add_argument("--gamma",        type=float, default=0.99, help="discount factor")
@@ -77,10 +78,11 @@ if args.smoke_test:
     args.n_episodes = 20
 
 ROOT    = Path(__file__).parent.parent
+tag_suffix = f"_{args.run_tag}" if args.run_tag else ""
 if args.learnable_beta:
-    OUT_DIR = ROOT / "runs" / f"rl_{args.dataset.lower()}" / f"ppo_seed{args.split_seed}_learnable_beta"
+    OUT_DIR = ROOT / "runs" / f"rl_{args.dataset.lower()}" / f"ppo_seed{args.split_seed}_learnable_beta{tag_suffix}"
 else:
-    OUT_DIR = ROOT / "runs" / f"rl_{args.dataset.lower()}" / f"ppo_seed{args.split_seed}_beta{args.beta}"
+    OUT_DIR = ROOT / "runs" / f"rl_{args.dataset.lower()}" / f"ppo_seed{args.split_seed}_beta{args.beta}{tag_suffix}"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 device = (
@@ -113,9 +115,9 @@ wall_start = time.time()
 # ============================================================
 if args.wandb:
     import wandb
-    run_name = (f"{args.dataset}-learnablebeta-seed{args.split_seed}"
+    run_name = (f"{args.dataset}-learnablebeta-seed{args.split_seed}{tag_suffix}"
                 if args.learnable_beta else
-                f"{args.dataset}-beta{args.beta}-seed{args.split_seed}")
+                f"{args.dataset}-beta{args.beta}-seed{args.split_seed}{tag_suffix}")
     wandb.init(
         project="graphhare",
         name=run_name,
