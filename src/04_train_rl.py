@@ -3,9 +3,18 @@ train_rl.py
 
 PPO training loop for RL graph construction.
 
+Evaluation protocol (no selection on noise, no test leakage):
+  - During training, only policy_val is ever evaluated.
+  - The refined graph with the best episode-end policy_val F1 is SAVED
+    (selection happens on policy_val, the designated model-selection set).
+  - After training, the frozen sage is evaluated on TEST exactly once per
+    graph of interest: original graph, best-selected graph, final graph.
+  - The honest learning signal is mean_last50_policy_val_f1 (not the
+    max over episodes, which inflates with episode count under noise).
+
 Run:
-    python3 src/train_rl.py --dataset Cora --split_seed 42
-    python3 src/train_rl.py --dataset Cora --split_seed 42 --smoke_test  # 20 episodes
+    python3 src/04_train_rl.py --dataset Cora --split_seed 42
+    python3 src/04_train_rl.py --dataset Cora --split_seed 42 --smoke_test  # 20 episodes
 """
 
 import argparse
@@ -53,6 +62,8 @@ parser.add_argument("--clip_eps",     type=float, default=0.2,  help="PPO clip r
 parser.add_argument("--vf_coef",      type=float, default=0.5)
 parser.add_argument("--entropy_coef", type=float, default=0.01)
 parser.add_argument("--n_epochs",     type=int, default=4,      help="PPO update epochs per episode")
+parser.add_argument("--dropout",      type=float, default=0.0,  help="policy dropout; keep 0 for PPO (train/eval mismatch corrupts the importance ratio)")
+parser.add_argument("--calib_episodes", type=int, default=5,    help="random-policy episodes for reward scale calibration")
 parser.add_argument("--smoke_test",   action="store_true",      help="run 20 episodes only")
 parser.add_argument("--seed",         type=int, default=42)
 parser.add_argument("--wandb",        action="store_true")
@@ -138,16 +149,24 @@ env = GraphEnv(
     knn_k=args.knn_k,
     max_steps=args.max_steps,
     reward_every=args.reward_every,
+    calib_episodes=args.calib_episodes,
     device=device,
 )
 
 policy = PolicyNet(
     edge_state_dim=env.edge_state_dim,
     hidden_dims=[256, 128],
-    dropout=0.1,
+    dropout=args.dropout,
     learnable_beta=args.learnable_beta,
     beta_init=args.beta,
 ).to(device)
+
+if args.learnable_beta:
+    print("WARNING: --learnable_beta is experimental. Beta receives gradients "
+          "only through the value loss (advantages are detached), so it tends "
+          "to shrink reward variance rather than optimize performance. Do not "
+          "report learnable-beta results without validating against the fixed-"
+          "beta sweep.")
 
 # kNN pool homophily (computed once from pool edges + ground truth labels)
 knn_pool_homophily = env._eval_homophily_from_pool()
@@ -168,7 +187,7 @@ class RolloutBuffer:
     Stores one episode. Per step we keep the full candidate set so we can
     recompute log_probs from the same categorical distribution during update.
 
-    For learnable beta: stores normalized (delta_f1, delta_hom) separately so
+    For learnable beta: stores scaled (delta_f1, delta_hom) separately so
     rewards can be recomputed with the current beta during the PPO update,
     allowing beta to receive gradients through the value loss.
     """
@@ -177,32 +196,32 @@ class RolloutBuffer:
         self.action_idxs   = []   # int index into all_states[t]
         self.log_probs     = []   # scalar, log_prob of chosen action
         self.rewards       = []   # float (combined reward, for fixed beta)
-        self.norm_delta_f1s  = []  # normalized delta_f1 per reward step
-        self.norm_delta_homs = []  # normalized delta_hom per reward step
+        self.scaled_delta_f1s  = []  # scaled delta_f1 per reward step
+        self.scaled_delta_homs = []  # scaled delta_hom per reward step
         self.values        = []   # scalar critic estimate
 
     def clear(self):
         self.__init__()
 
     def add(self, all_states, action_idx, log_prob, reward, value,
-            norm_delta_f1=0.0, norm_delta_hom=0.0):
+            scaled_delta_f1=0.0, scaled_delta_hom=0.0):
         self.all_states.append(all_states)
         self.action_idxs.append(action_idx)
         self.log_probs.append(log_prob)
         self.rewards.append(reward)
-        self.norm_delta_f1s.append(norm_delta_f1)
-        self.norm_delta_homs.append(norm_delta_hom)
+        self.scaled_delta_f1s.append(scaled_delta_f1)
+        self.scaled_delta_homs.append(scaled_delta_hom)
         self.values.append(value)
 
     def compute_returns(self, beta=None):
         """
         Discounted returns. If beta is a tensor (learnable), recomputes rewards
-        from raw deltas so beta gets gradients. Otherwise uses stored rewards.
+        from scaled deltas so beta gets gradients. Otherwise uses stored rewards.
         """
-        if beta is not None and len(self.norm_delta_f1s) > 0:
+        if beta is not None and len(self.scaled_delta_f1s) > 0:
             # recompute rewards with current learnable beta (differentiable)
             rewards = [df1 + beta * dhom
-                       for df1, dhom in zip(self.norm_delta_f1s, self.norm_delta_homs)]
+                       for df1, dhom in zip(self.scaled_delta_f1s, self.scaled_delta_homs)]
         else:
             rewards = self.rewards
 
@@ -227,12 +246,16 @@ buffer = RolloutBuffer()
 # ============================================================
 # training loop
 # ============================================================
-best_macro_f1 = env.baseline_macro_f1
+best_macro_f1 = env.baseline_macro_f1   # selection metric: episode-end policy_val F1
+best_episode  = 0
+best_graph    = env.original_edge_index.cpu().clone()  # fall back to original graph
 episode_rewards = []
 episode_macro_f1s = []
 episode_homophilys = []
 
-print(f"\nbaseline: macro_f1={env.baseline_macro_f1:.4f}  homophily={env.baseline_homophily:.4f}  beta={args.beta}\n")
+print(f"\nbaseline: policy_val macro_f1={env.baseline_macro_f1:.4f}  "
+      f"homophily(full)={env.baseline_homophily:.4f}  "
+      f"homophily(reward)={env.baseline_reward_homophily:.4f}  beta={args.beta}\n")
 
 for episode in range(1, args.n_episodes + 1):
     buffer.clear()
@@ -275,8 +298,8 @@ for episode in range(1, args.n_episodes + 1):
             log_prob=log_prob.item(),
             reward=reward,
             value=value.item(),
-            norm_delta_f1=info.get("norm_delta_f1", 0.0),
-            norm_delta_hom=info.get("norm_delta_hom", 0.0),
+            scaled_delta_f1=info.get("scaled_delta_f1", 0.0),
+            scaled_delta_hom=info.get("scaled_delta_hom", 0.0),
         )
 
         if done:
@@ -327,8 +350,9 @@ for episode in range(1, args.n_episodes + 1):
         grad_norm = nn.utils.clip_grad_norm_(policy.parameters(), max_norm=0.5)
         optimizer.step()
 
-    # ---- eval + logging ----
+    # ---- eval + logging (policy_val only during training) ----
     macro_f1, homophily = env.get_current_metrics()
+    reward_homophily = env.get_current_reward_homophily()
     episode_rewards.append(ep_reward)
     episode_macro_f1s.append(macro_f1)
     episode_homophilys.append(homophily)
@@ -341,6 +365,7 @@ for episode in range(1, args.n_episodes + 1):
         "reward": ep_reward,
         "macro_f1": macro_f1,
         "homophily": homophily,
+        "reward_homophily": reward_homophily,
         "delta_macro_f1": delta_macro,
         "delta_homophily": delta_homophily,
         "valid_actions": ep_valid,
@@ -357,9 +382,15 @@ for episode in range(1, args.n_episodes + 1):
         log_dict["beta"] = policy.beta.item()
     log(log_dict)
 
+    # selection on policy_val: keep the GRAPH (the actual artifact) + policy
     if macro_f1 > best_macro_f1:
         best_macro_f1 = macro_f1
+        best_episode  = episode
+        best_graph    = env.get_graph_copy()
         torch.save(policy.state_dict(), OUT_DIR / "best_policy.pt")
+        torch.save({"edge_index": best_graph, "episode": episode,
+                    "policy_val_macro_f1": macro_f1},
+                   OUT_DIR / "best_graph.pt")
 
     if episode % 10 == 0 or episode <= 5:
         print(f"ep {episode:04d} | reward={ep_reward:+.4f} | "
@@ -368,21 +399,47 @@ for episode in range(1, args.n_episodes + 1):
               f"edges={env.current_edge_index.size(1)}")
 
 # ============================================================
-# final summary
+# final summary + ONE-TIME test evaluation
 # ============================================================
+final_macro_f1, final_homophily = env.get_current_metrics()
+final_graph = env.get_graph_copy()
+torch.save({"edge_index": final_graph, "episode": args.n_episodes,
+            "policy_val_macro_f1": final_macro_f1},
+           OUT_DIR / "final_graph.pt")
+
+# honest learning signal: average of the last 50 episode-end policy_val F1s.
+# (the max over episodes inflates with episode count under noise -- a random
+# policy "improves" by ~3.5 sigma over 500 episodes. never report the max alone.)
+last50 = episode_macro_f1s[-50:] if len(episode_macro_f1s) >= 50 else episode_macro_f1s
+mean_last50 = float(np.mean(last50)) if last50 else env.baseline_macro_f1
+std_last50  = float(np.std(last50))  if last50 else 0.0
+
+# test is touched exactly here, once per graph, after all training decisions
+test_original = env.evaluate_graph(env.original_edge_index, split="test")
+test_best     = env.evaluate_graph(best_graph,  split="test")
+test_final    = env.evaluate_graph(final_graph, split="test")
+hom_best_full   = env._eval_homophily(best_graph)
+hom_best_reward = env._eval_reward_homophily(best_graph)
+
 print(f"\n{'='*55}")
 print(f"  DONE | {args.dataset} | {args.n_episodes} episodes")
 print(f"{'='*55}")
-print(f"  baseline macro_f1:  {env.baseline_macro_f1:.4f}")
-print(f"  best macro_f1:      {best_macro_f1:.4f}  "
-      f"(delta={best_macro_f1 - env.baseline_macro_f1:+.4f})")
-print(f"  avg reward (last 50): {np.mean(episode_rewards[-50:]):.4f}")
-
-final_macro_f1, final_homophily = env.get_current_metrics()
+print(f"  policy_val baseline:        {env.baseline_macro_f1:.4f}")
+print(f"  policy_val mean (last 50):  {mean_last50:.4f} +/- {std_last50:.4f}  "
+      f"(delta={mean_last50 - env.baseline_macro_f1:+.4f})")
+print(f"  policy_val best (ep {best_episode:04d}):   {best_macro_f1:.4f}  "
+      f"(selection metric -- inflated by max over episodes, do not headline)")
+print(f"  avg reward (last 50):       {np.mean(episode_rewards[-50:]):.4f}")
+print(f"  --- test (evaluated once, after training) ---")
+print(f"  test F1 original graph:     {test_original['macro_f1']:.4f}  (GraphSAGE baseline)")
+print(f"  test F1 best graph:         {test_best['macro_f1']:.4f}  "
+      f"(delta={test_best['macro_f1'] - test_original['macro_f1']:+.4f})")
+print(f"  test F1 final graph:        {test_final['macro_f1']:.4f}")
 
 results = {
     "dataset": args.dataset,
     "split_seed": args.split_seed,
+    "seed": args.seed,
     "n_episodes": args.n_episodes,
     "beta": args.beta,
     "learnable_beta": args.learnable_beta,
@@ -390,13 +447,31 @@ results = {
     "git_commit": git_commit,
     "config_file": args.config,
     "wall_time_sec": round(time.time() - wall_start, 1),
+    # reward calibration (frozen scales from the random-policy pre-pass)
+    "reward_f1_scale": env.f1_scale,
+    "reward_hom_scale": env.hom_scale,
+    # homophily reporting: full graph (all labels) and reward view (non-test)
     "homophily_original": env.baseline_homophily,
+    "homophily_original_reward": env.baseline_reward_homophily,
     "homophily_knn_pool": knn_pool_homophily,
     "homophily_refined": final_homophily,
+    "homophily_best_graph": hom_best_full,
+    "homophily_best_graph_reward": hom_best_reward,
+    # policy_val (training-time signal + selection)
     "baseline_macro_f1": env.baseline_macro_f1,
-    "best_macro_f1": best_macro_f1,
+    "mean_last50_policy_val_f1": mean_last50,
+    "std_last50_policy_val_f1": std_last50,
+    "best_macro_f1": best_macro_f1,            # selection metric (max over episodes)
+    "best_episode": best_episode,
     "delta_macro_f1": best_macro_f1 - env.baseline_macro_f1,
     "final_macro_f1": final_macro_f1,
+    # test (the headline numbers -- evaluated once, post-training)
+    "test": {
+        "original_graph": test_original,
+        "best_graph": test_best,
+        "final_graph": test_final,
+        "delta_f1_best_vs_original": test_best["macro_f1"] - test_original["macro_f1"],
+    },
     "episode_rewards": episode_rewards,
     "episode_macro_f1s": episode_macro_f1s,
     "episode_homophilys": episode_homophilys,
@@ -404,10 +479,15 @@ results = {
 }
 (OUT_DIR / "results.json").write_text(json.dumps(results, indent=2))
 print(f"\nresults saved to {OUT_DIR / 'results.json'}")
+print(f"graphs saved to {OUT_DIR / 'best_graph.pt'} / {OUT_DIR / 'final_graph.pt'}")
 
 log({
     "final/macro_f1": final_macro_f1,
+    "final/mean_last50_policy_val_f1": mean_last50,
     "final/best_macro_f1": best_macro_f1,
+    "final/test_f1_original_graph": test_original["macro_f1"],
+    "final/test_f1_best_graph": test_best["macro_f1"],
+    "final/test_f1_final_graph": test_final["macro_f1"],
     "final/homophily_original": env.baseline_homophily,
     "final/homophily_knn_pool": knn_pool_homophily,
     "final/homophily_refined": final_homophily,

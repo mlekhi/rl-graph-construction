@@ -5,7 +5,21 @@ GraphEnv: gym-style environment for RL graph construction.
 
 The agent sequentially edits a citation graph (add/remove edges).
 A frozen GraphSAGE scores the result on policy_val.
-Reward: r_t = delta_macro_f1 + beta * delta_homophily  (GraphHARE)
+Reward (GraphHARE):
+    r_t = (delta_macro_f1 / s_f1) + beta * (delta_homophily / s_hom)
+where the deltas are between CONSECUTIVE evaluation points (every
+`reward_every` edits), and s_f1 / s_hom are fixed scales calibrated once
+from a random-policy pre-pass so that beta is interpretable and the
+reward scale is stationary across training.
+
+Label-usage protocol (no test leakage):
+  - The F1 term uses policy_val labels only (policy_val is the reward set).
+  - The homophily REWARD term uses ground-truth labels only on edges whose
+    BOTH endpoints are non-test nodes (train + sage_val + policy_val).
+    Test-node labels never enter any training signal.
+  - Full-graph homophily (all edges, ground truth) is computed only for
+    REPORTING, never for reward.
+  - Test-set F1 is evaluated once, after training, on the selected graph.
 
 Usage:
     env = GraphEnv(dataset="Cora", split_seed=42, beta=0.5, knn_k=10)
@@ -75,20 +89,18 @@ class GraphEnv:
         knn_k: int = 10,           # kNN candidate pool size
         max_steps: int = 50,       # edits per episode
         reward_every: int = 5,     # compute reward every N steps
-        ema_alpha: float = 0.3,    # EMA smoothing for reward
         min_degree: int = 2,       # min edges per node (constraint)
-        norm_warmup: int = 20,     # reward steps before normalization kicks in
+        calib_episodes: int = 5,   # random-policy episodes used to calibrate reward scales
         device: torch.device = None,
     ):
         self.dataset    = dataset
         self.split_seed = split_seed
         self.beta       = beta
         self.knn_k      = knn_k
-        self.norm_warmup = norm_warmup
         self.max_steps  = max_steps
         self.reward_every = reward_every
-        self.ema_alpha  = ema_alpha
         self.min_degree = min_degree
+        self.calib_episodes = calib_episodes
         self.device     = device or (
             torch.device("mps")  if torch.backends.mps.is_available()  else
             torch.device("cuda") if torch.cuda.is_available() else
@@ -99,13 +111,15 @@ class GraphEnv:
         self._load_frozen_sage()
         self._build_knn_pool()
         self._compute_baseline()
-        self._init_norm_stats()
+        self._calibrate_reward_scales()
 
         print(f"GraphEnv ready | {dataset} | {self.num_nodes} nodes | "
               f"{self.original_edge_index.size(1)} edges | "
               f"kNN pool: {sum(len(v) for v in self.knn_pool.values())} candidates | "
               f"baseline macro_f1={self.baseline_macro_f1:.4f} | "
-              f"baseline homophily={self.baseline_homophily:.4f}")
+              f"baseline homophily(full)={self.baseline_homophily:.4f} | "
+              f"baseline homophily(reward, non-test)={self.baseline_reward_homophily:.4f} | "
+              f"reward scales: s_f1={self.f1_scale:.5f} s_hom={self.hom_scale:.5f}")
 
     # ----------------------------------------------------------
     # setup
@@ -136,6 +150,10 @@ class GraphEnv:
         self.sage_val_mask   = masks["sage_val_mask"].to(self.device)
         self.policy_val_mask = masks["policy_val_mask"].to(self.device)
         self.test_mask       = masks["test_mask"].to(self.device)
+        # nodes whose ground-truth labels may appear in the TRAINING signal.
+        # test labels must never reach the reward, hence the reward-homophily
+        # term is restricted to edges between non-test nodes.
+        self.non_test_mask   = ~self.test_mask
 
 
     def _load_frozen_sage(self):
@@ -182,42 +200,56 @@ class GraphEnv:
         self.knn_pool = {k: list(v) for k, v in self._knn_pool_original.items()}
 
     def _compute_baseline(self):
-        """F1 and homophily on original graph -- reward deltas are relative to these."""
+        """Reference metrics on the original graph (episode starting point)."""
         mf1, _ = self._eval_f1(self.original_edge_index.to(self.device))
-        self.baseline_macro_f1  = mf1
+        self.baseline_macro_f1 = mf1
+        # full-graph homophily: REPORTING ONLY (uses all ground-truth labels)
         self.baseline_homophily = self._eval_homophily(self.original_edge_index)
+        # reward homophily: restricted to non-test edges, safe for the reward
+        self.baseline_reward_homophily = self._eval_reward_homophily(self.original_edge_index)
 
-    def _init_norm_stats(self):
-        """Running variance estimates for reward normalization (Welford online algorithm)."""
-        self._norm_n      = 0
-        self._norm_f1_m2  = 0.0   # sum of squared deviations for delta_f1
-        self._norm_hom_m2 = 0.0   # sum of squared deviations for delta_homophily
-        self._norm_f1_mean  = 0.0
-        self._norm_hom_mean = 0.0
-
-    def _update_norm_stats(self, delta_f1, delta_hom):
-        """Welford online update for running mean and variance."""
-        self._norm_n += 1
-        n = self._norm_n
-        # delta_f1
-        d1 = delta_f1 - self._norm_f1_mean
-        self._norm_f1_mean += d1 / n
-        self._norm_f1_m2   += d1 * (delta_f1 - self._norm_f1_mean)
-        # delta_homophily
-        d2 = delta_hom - self._norm_hom_mean
-        self._norm_hom_mean += d2 / n
-        self._norm_hom_m2   += d2 * (delta_hom - self._norm_hom_mean)
-
-    def _normalize(self, delta_f1, delta_hom):
+    def _calibrate_reward_scales(self):
         """
-        Normalize delta_f1 and delta_hom by their running std.
-        During warmup (first norm_warmup steps) returns raw values.
+        Estimate fixed scales for the two reward terms from a random-policy
+        pre-pass, so that r = delta_f1/s_f1 + beta * delta_hom/s_hom puts both
+        terms on comparable scale (beta=1 ~ equal weight) WITHOUT the
+        non-stationarity of normalizing by running statistics of the learning
+        policy's own rewards. Scales are frozen before training starts.
         """
-        if self._norm_n < self.norm_warmup:
-            return delta_f1, delta_hom
-        std_f1  = max((self._norm_f1_m2  / self._norm_n) ** 0.5, 1e-8)
-        std_hom = max((self._norm_hom_m2 / self._norm_n) ** 0.5, 1e-8)
-        return delta_f1 / std_f1, delta_hom / std_hom
+        self.f1_scale, self.hom_scale = 1.0, 1.0   # raw deltas during calibration
+        f1_deltas, hom_deltas = [], []
+
+        for _ in range(self.calib_episodes):
+            self.reset()
+            attempts = 0
+            while not self.done and attempts < self.max_steps * 10:
+                attempts += 1
+                node_i = self.sample_node_by_entropy()
+                candidates = self.get_node_candidates(node_i)
+                if not candidates:
+                    continue
+                action = candidates[np.random.randint(len(candidates))]
+                _, _, _, info = self.step(action)
+                if info["is_reward_step"]:
+                    f1_deltas.append(info["raw_delta_f1"])
+                    hom_deltas.append(info["raw_delta_hom"])
+
+        def _scale(deltas, fallback):
+            arr = np.asarray(deltas, dtype=np.float64)
+            if arr.size == 0:
+                return fallback
+            std = float(arr.std())
+            if std > 1e-8:
+                return std
+            mean_abs = float(np.abs(arr).mean())
+            return mean_abs if mean_abs > 1e-8 else fallback
+
+        # fallbacks: one prediction flip on policy_val / one edge flip in the graph
+        n_pv    = int(self.policy_val_mask.sum().item())
+        n_edges = max(self.original_edge_index.size(1) // 2, 1)
+        self.f1_scale  = _scale(f1_deltas,  1.0 / max(n_pv, 1))
+        self.hom_scale = _scale(hom_deltas, 1.0 / n_edges)
+        self._calib_samples = len(f1_deltas)
 
     # ----------------------------------------------------------
     # gym interface
@@ -228,9 +260,9 @@ class GraphEnv:
         self.knn_pool = {k: list(v) for k, v in self._knn_pool_original.items()}
         self.step_count  = 0
         self.done        = False
-        self.ema_reward  = 0.0
-        self.episode_start_macro_f1  = self.baseline_macro_f1
-        self.episode_start_homophily = self.baseline_homophily
+        # consecutive-delta reward: track metrics at the previous evaluation point
+        self._last_eval_f1  = self.baseline_macro_f1
+        self._last_eval_hom = self.baseline_reward_homophily
         self._refresh_sage_cache()
         return self._get_node_states(), self._get_all_candidates()
 
@@ -242,30 +274,28 @@ class GraphEnv:
         assert not self.done, "episode is done, call reset()"
         node_i, node_j, op = action
 
-        # apply edit
+        # apply edit; refresh frozen-sage cache so the agent always sees the
+        # state of the CURRENT graph (design doc: state updates between edits)
         valid = self._apply_edit(int(node_i), int(node_j), op)
         self.step_count += 1
-
-        # compute reward every reward_every steps
-        reward = 0.0
-        norm_f1_out = 0.0
-        norm_hom_out = 0.0
-        if self.step_count % self.reward_every == 0:
-            mf1, _    = self._eval_f1(self.current_edge_index)
-            homophily = self._eval_homophily(self.current_edge_index)
-            delta_f1  = mf1      - self.baseline_macro_f1
-            delta_hom = homophily - self.baseline_homophily
-            # update running stats then normalize
-            self._update_norm_stats(delta_f1, delta_hom)
-            norm_f1, norm_hom = self._normalize(delta_f1, delta_hom)
-            norm_f1_out, norm_hom_out = norm_f1, norm_hom
-            raw_reward = norm_f1 + self.beta * norm_hom
-            # EMA smoothing
-            self.ema_reward = (
-                self.ema_alpha * raw_reward + (1 - self.ema_alpha) * self.ema_reward
-            )
-            reward = self.ema_reward
+        if valid:
             self._refresh_sage_cache()
+
+        # compute reward every reward_every steps:
+        # consecutive deltas, scaled by frozen calibration constants
+        reward = 0.0
+        scaled_f1_out, scaled_hom_out = 0.0, 0.0
+        raw_f1_out, raw_hom_out = 0.0, 0.0
+        is_reward_step = self.step_count % self.reward_every == 0
+        if is_reward_step:
+            mf1, _    = self._eval_f1(self.current_edge_index)
+            homophily = self._eval_reward_homophily(self.current_edge_index)
+            raw_f1_out  = mf1       - self._last_eval_f1
+            raw_hom_out = homophily - self._last_eval_hom
+            self._last_eval_f1, self._last_eval_hom = mf1, homophily
+            scaled_f1_out  = raw_f1_out  / self.f1_scale
+            scaled_hom_out = raw_hom_out / self.hom_scale
+            reward = scaled_f1_out + self.beta * scaled_hom_out
 
         self.done = self.step_count >= self.max_steps
 
@@ -273,8 +303,11 @@ class GraphEnv:
             "step": self.step_count,
             "valid_action": valid,
             "num_edges": self.current_edge_index.size(1),
-            "norm_delta_f1": norm_f1_out,
-            "norm_delta_hom": norm_hom_out,
+            "is_reward_step": is_reward_step,
+            "raw_delta_f1": raw_f1_out,
+            "raw_delta_hom": raw_hom_out,
+            "scaled_delta_f1": scaled_f1_out,
+            "scaled_delta_hom": scaled_hom_out,
         }
         return self._get_node_states(), reward, self.done, info
 
@@ -293,34 +326,34 @@ class GraphEnv:
         self._compute_structural_features()
 
     def _compute_structural_features(self):
-        """Degree, homophily, structural entropy per node."""
+        """
+        Degree, homophily, structural entropy per node (predicted labels).
+        Vectorized -- this runs after every edit now that the state cache is
+        refreshed per step, so the old per-node python loop would be too slow.
+        """
         ei = self.current_edge_index.cpu().numpy()
         n  = self.num_nodes
         preds = self.cached_preds.cpu().numpy()
+        src, dst = ei[0], ei[1]
 
-        degree      = np.zeros(n, dtype=np.float32)
-        homophily   = np.zeros(n, dtype=np.float32)
-        entropy     = np.zeros(n, dtype=np.float32)
+        degree = np.bincount(src, minlength=n).astype(np.float32)
+        safe_deg = np.maximum(degree, 1.0)
 
-        # build adjacency list
-        adj = [[] for _ in range(n)]
-        for s, t in zip(ei[0], ei[1]):
-            adj[s].append(t)
+        # homophily: fraction of neighbors with same predicted class
+        same = (preds[src] == preds[dst]).astype(np.float64)
+        homophily = (np.bincount(src, weights=same, minlength=n) / safe_deg).astype(np.float32)
 
-        for i in range(n):
-            nbrs = adj[i]
-            deg  = len(nbrs)
-            degree[i] = deg
-            if deg == 0:
-                continue
-            nbr_labels = preds[nbrs]
-            # homophily: fraction of neighbors with same predicted class
-            homophily[i] = float((nbr_labels == preds[i]).mean())
-            # structural entropy: entropy of neighbor label distribution
-            counts = np.bincount(nbr_labels, minlength=self.num_classes).astype(float)
-            probs  = counts / counts.sum()
-            probs  = probs[probs > 0]
-            entropy[i] = float(-np.sum(probs * np.log(probs + 1e-12)))
+        # structural entropy: entropy of the neighbor predicted-label distribution
+        counts = np.zeros((n, self.num_classes), dtype=np.float64)
+        np.add.at(counts, (src, preds[dst]), 1.0)
+        row_sums = np.maximum(counts.sum(axis=1, keepdims=True), 1.0)
+        probs = counts / row_sums
+        entropy = -np.sum(np.where(probs > 0, probs * np.log(probs), 0.0), axis=1)
+        entropy = entropy.astype(np.float32)
+
+        zero_deg = degree == 0
+        homophily[zero_deg] = 0.0
+        entropy[zero_deg]   = 0.0
 
         self.struct_degree    = torch.tensor(degree,    device=self.device)
         self.struct_homophily = torch.tensor(homophily, device=self.device)
@@ -491,7 +524,7 @@ class GraphEnv:
     # reward computation
     # ----------------------------------------------------------
     def _eval_f1(self, edge_index):
-        """Macro-F1 on policy_val."""
+        """Macro-F1 on policy_val (the designated reward set)."""
         self.sage.eval()
         with torch.no_grad():
             logits = self.sage(self.x, edge_index)
@@ -504,29 +537,77 @@ class GraphEnv:
         macro_f1 = float(f1_per_class.mean())
         return macro_f1, f1_per_class
 
-    def _eval_homophily(self, edge_index):
+    def _edge_homophily(self, edge_index, node_mask=None):
         """
-        Edge homophily (Zhu et al. 2020) using ground-truth labels:
-            h = |{(i,j) in E : y_i == y_j}| / |E|
-        Counts each undirected edge once (src < dst).
+        Edge homophily (Zhu et al. 2020): h = |{(i,j) in E : y_i == y_j}| / |E|.
+        Counts each undirected edge once (src < dst). If node_mask is given,
+        only edges with BOTH endpoints inside the mask are counted.
         """
         src = edge_index[0].cpu()
         dst = edge_index[1].cpu()
-        mask = src < dst
-        src, dst = src[mask], dst[mask]
+        keep = src < dst
+        if node_mask is not None:
+            nm = node_mask.cpu()
+            keep = keep & nm[src] & nm[dst]
+        src, dst = src[keep], dst[keep]
         if len(src) == 0:
             return 0.0
         labels = self.y.cpu()
         return float((labels[src] == labels[dst]).float().mean().item())
 
+    def _eval_homophily(self, edge_index):
+        """Full-graph homophily, all ground-truth labels. REPORTING ONLY."""
+        return self._edge_homophily(edge_index, node_mask=None)
+
+    def _eval_reward_homophily(self, edge_index):
+        """
+        Homophily restricted to edges between non-test nodes. This is the
+        version that may enter the reward: test labels never touch it.
+        """
+        return self._edge_homophily(edge_index, node_mask=self.non_test_mask)
+
+    # ----------------------------------------------------------
+    # post-training evaluation (reporting; test used ONLY here)
+    # ----------------------------------------------------------
+    def evaluate_graph(self, edge_index, split="test"):
+        """
+        Accuracy + macro-F1 of the frozen sage on a given graph and split.
+        `split` in {"test", "policy_val", "sage_val", "train"}.
+        Call with split="test" only AFTER training, on the selected graph.
+        """
+        mask = {
+            "test": self.test_mask,
+            "policy_val": self.policy_val_mask,
+            "sage_val": self.sage_val_mask,
+            "train": self.train_mask,
+        }[split]
+        self.sage.eval()
+        with torch.no_grad():
+            logits = self.sage(self.x, edge_index.to(self.device))
+            pred = logits[mask].argmax(1).cpu().numpy()
+            true = self.y[mask].cpu().numpy()
+        acc = float((pred == true).mean())
+        _, _, f1, _ = precision_recall_fscore_support(
+            true, pred, average="macro", zero_division=0
+        )
+        return {"accuracy": acc, "macro_f1": float(f1)}
+
+    def get_graph_copy(self):
+        """CPU copy of the current edge_index (for saving the refined graph)."""
+        return self.current_edge_index.detach().cpu().clone()
+
     # ----------------------------------------------------------
     # utils
     # ----------------------------------------------------------
     def get_current_metrics(self):
-        """Current macro-F1 and edge homophily (for logging)."""
+        """Current policy_val macro-F1 and full-graph homophily (for logging)."""
         macro_f1, _ = self._eval_f1(self.current_edge_index)
         homophily   = self._eval_homophily(self.current_edge_index)
         return macro_f1, homophily
+
+    def get_current_reward_homophily(self):
+        """Current non-test-edge homophily (the quantity the reward sees)."""
+        return self._eval_reward_homophily(self.current_edge_index)
 
     def _eval_homophily_from_pool(self):
         """
