@@ -55,6 +55,7 @@ parser.add_argument("--params_json", type=str, default=None,
                     help="tuned PPO params (default: runs/rl_<ds>/ppo_optuna_best.json)")
 parser.add_argument("--rerun",      action="store_true", help="rerun even if results.json exists")
 parser.add_argument("--run_tag",    type=str, default="ms", help="tag for the multiseed runs")
+parser.add_argument("--wandb",      action="store_true", help="forward --wandb to each 04_train_rl.py run (logs every seed/beta)")
 args = parser.parse_args()
 
 BETAS = [float(b) for b in args.betas.split(",")]
@@ -222,6 +223,8 @@ for seed in SEEDS:
                       "gamma", "vf_coef", "max_steps"]:
                 if k in tuned:
                     cmd += [f"--{k}", tuned[k]]
+            if args.wandb:
+                cmd += ["--wandb"]
             run(cmd)
         d = json.loads(results_path.read_text())
         per_seed[seed]["hare"][beta] = d["test"]
