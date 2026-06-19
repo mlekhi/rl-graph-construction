@@ -27,7 +27,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from torch_geometric.datasets import Planetoid
-from torch_geometric.nn import SAGEConv
+from torch_geometric.nn import (SAGEConv, GCNConv, GATConv, APPNP,
+                                GCN2Conv, TransformerConv, GAE)
 from tqdm import tqdm
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
@@ -198,6 +199,107 @@ class MLPNet(nn.Module):
         return self.net(x)
 
 
+class GCNNet(nn.Module):
+    def __init__(self, in_dim, hidden_dim, num_layers, dropout):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.convs = nn.ModuleList()
+        self.convs.append(GCNConv(in_dim, hidden_dim))
+        for _ in range(num_layers - 2):
+            self.convs.append(GCNConv(hidden_dim, hidden_dim))
+        self.convs.append(GCNConv(hidden_dim, num_classes))
+
+    def forward(self, x, edge_index):
+        for conv in self.convs[:-1]:
+            x = F.relu(conv(x, edge_index))
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        return self.convs[-1](x, edge_index)
+
+
+class GATNet(nn.Module):
+    def __init__(self, in_dim, hidden_dim, num_layers, dropout, heads):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.convs = nn.ModuleList()
+        self.convs.append(GATConv(in_dim, hidden_dim, heads=heads, dropout=dropout))
+        for _ in range(num_layers - 2):
+            self.convs.append(GATConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=dropout))
+        self.convs.append(GATConv(hidden_dim * heads, num_classes, heads=1, concat=False, dropout=dropout))
+
+    def forward(self, x, edge_index):
+        for conv in self.convs[:-1]:
+            x = F.elu(conv(x, edge_index))
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        return self.convs[-1](x, edge_index)
+
+
+class APPNPNet(nn.Module):
+    def __init__(self, in_dim, hidden_dim, dropout, K, alpha):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.lin1 = nn.Linear(in_dim, hidden_dim)
+        self.lin2 = nn.Linear(hidden_dim, num_classes)
+        self.prop = APPNP(K=K, alpha=alpha)
+
+    def forward(self, x, edge_index):
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = F.relu(self.lin1(x))
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = self.lin2(x)
+        return self.prop(x, edge_index)
+
+
+class GCNIINet(nn.Module):
+    def __init__(self, in_dim, hidden_dim, num_layers, dropout, alpha, theta):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.lin_in = nn.Linear(in_dim, hidden_dim)
+        self.lin_out = nn.Linear(hidden_dim, num_classes)
+        self.convs = nn.ModuleList()
+        for layer in range(num_layers):
+            self.convs.append(GCN2Conv(hidden_dim, alpha=alpha, theta=theta, layer=layer + 1))
+
+    def forward(self, x, edge_index):
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = x0 = F.relu(self.lin_in(x))
+        for conv in self.convs:
+            x = F.dropout(x, p=self.dropout, training=self.training)
+            x = F.relu(conv(x, x0, edge_index))
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        return self.lin_out(x)
+
+
+class GraphTransNet(nn.Module):
+    def __init__(self, in_dim, hidden_dim, num_layers, dropout, heads):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.convs = nn.ModuleList()
+        self.convs.append(TransformerConv(in_dim, hidden_dim, heads=heads, dropout=dropout))
+        for _ in range(num_layers - 2):
+            self.convs.append(TransformerConv(hidden_dim * heads, hidden_dim, heads=heads, dropout=dropout))
+        self.convs.append(TransformerConv(hidden_dim * heads, num_classes, heads=1, concat=False, dropout=dropout))
+
+    def forward(self, x, edge_index):
+        for conv in self.convs[:-1]:
+            x = F.elu(conv(x, edge_index))
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        return self.convs[-1](x, edge_index)
+
+
+class GAEEncoder(nn.Module):
+    """GCN encoder for the graph-autoencoder baseline (embeddings -> linear probe)."""
+    def __init__(self, in_dim, hidden_dim, out_dim, dropout):
+        super().__init__()
+        self.dropout = float(dropout)
+        self.conv1 = GCNConv(in_dim, hidden_dim)
+        self.conv2 = GCNConv(hidden_dim, out_dim)
+
+    def forward(self, x, edge_index):
+        x = F.relu(self.conv1(x, edge_index))
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        return self.conv2(x, edge_index)
+
+
 # ============================================================
 # train / eval
 # ============================================================
@@ -266,6 +368,59 @@ MLP_SPACE = {
     "weight_decay": {"type": "float",       "low": 1e-6, "high": 1e-2, "log": True},
 }
 
+GCN_SPACE = {
+    "hidden_dim":   {"type": "categorical", "choices": [64, 128, 256]},
+    "num_layers":   {"type": "int",         "low": 2, "high": 4},
+    "dropout":      {"type": "float",       "low": 0.2, "high": 0.6},
+    "lr":           {"type": "float",       "low": 1e-4, "high": 1e-2, "log": True},
+    "weight_decay": {"type": "float",       "low": 1e-6, "high": 1e-2, "log": True},
+}
+
+GAT_SPACE = {
+    "hidden_dim":   {"type": "categorical", "choices": [8, 16, 32]},
+    "num_layers":   {"type": "int",         "low": 2, "high": 3},
+    "heads":        {"type": "categorical", "choices": [4, 8]},
+    "dropout":      {"type": "float",       "low": 0.2, "high": 0.6},
+    "lr":           {"type": "float",       "low": 1e-4, "high": 1e-2, "log": True},
+    "weight_decay": {"type": "float",       "low": 1e-6, "high": 1e-2, "log": True},
+}
+
+APPNP_SPACE = {
+    "hidden_dim":   {"type": "categorical", "choices": [64, 128, 256]},
+    "dropout":      {"type": "float",       "low": 0.2, "high": 0.6},
+    "K":            {"type": "int",         "low": 5, "high": 15},
+    "alpha":        {"type": "float",       "low": 0.05, "high": 0.2},
+    "lr":           {"type": "float",       "low": 1e-4, "high": 1e-2, "log": True},
+    "weight_decay": {"type": "float",       "low": 1e-6, "high": 1e-2, "log": True},
+}
+
+GCNII_SPACE = {
+    "hidden_dim":   {"type": "categorical", "choices": [64, 128, 256]},
+    "num_layers":   {"type": "int",         "low": 2, "high": 8},
+    "dropout":      {"type": "float",       "low": 0.2, "high": 0.6},
+    "alpha":        {"type": "float",       "low": 0.1, "high": 0.5},
+    "theta":        {"type": "float",       "low": 0.5, "high": 1.5},
+    "lr":           {"type": "float",       "low": 1e-4, "high": 1e-2, "log": True},
+    "weight_decay": {"type": "float",       "low": 1e-6, "high": 1e-2, "log": True},
+}
+
+GRAPHTRANS_SPACE = {
+    "hidden_dim":   {"type": "categorical", "choices": [16, 32, 64]},
+    "num_layers":   {"type": "int",         "low": 2, "high": 3},
+    "heads":        {"type": "categorical", "choices": [2, 4]},
+    "dropout":      {"type": "float",       "low": 0.2, "high": 0.6},
+    "lr":           {"type": "float",       "low": 1e-4, "high": 1e-2, "log": True},
+    "weight_decay": {"type": "float",       "low": 1e-6, "high": 1e-2, "log": True},
+}
+
+GAE_SPACE = {
+    "hidden_dim":   {"type": "categorical", "choices": [128, 256]},
+    "out_dim":      {"type": "categorical", "choices": [64, 128]},
+    "dropout":      {"type": "float",       "low": 0.2, "high": 0.6},
+    "lr":           {"type": "float",       "low": 1e-3, "high": 1e-2, "log": True},
+    "weight_decay": {"type": "float",       "low": 1e-6, "high": 1e-3, "log": True},
+}
+
 
 def suggest(trial, space):
     p = {}
@@ -312,6 +467,27 @@ def build_sage(p):
 def build_mlp(p):
     return MLPNet(raw.num_node_features, int(p["hidden_dim"]),
                   int(p["num_layers"]), float(p["dropout"]))
+
+def build_gcn(p):
+    return GCNNet(raw.num_node_features, int(p["hidden_dim"]),
+                  int(p["num_layers"]), float(p["dropout"]))
+
+def build_gat(p):
+    return GATNet(raw.num_node_features, int(p["hidden_dim"]),
+                  int(p["num_layers"]), float(p["dropout"]), int(p["heads"]))
+
+def build_appnp(p):
+    return APPNPNet(raw.num_node_features, int(p["hidden_dim"]),
+                    float(p["dropout"]), int(p["K"]), float(p["alpha"]))
+
+def build_gcnii(p):
+    return GCNIINet(raw.num_node_features, int(p["hidden_dim"]),
+                    int(p["num_layers"]), float(p["dropout"]),
+                    float(p["alpha"]), float(p["theta"]))
+
+def build_graphtrans(p):
+    return GraphTransNet(raw.num_node_features, int(p["hidden_dim"]),
+                         int(p["num_layers"]), float(p["dropout"]), int(p["heads"]))
 
 
 def run_baseline(model_name, build_fn, space):
@@ -367,11 +543,121 @@ def run_baseline(model_name, build_fn, space):
 
 
 # ============================================================
+# graph-autoencoder baseline (GAE pretrain -> linear probe on embeddings)
+# edges are structure, not labels, so unsupervised reconstruction is leak-free
+# ============================================================
+GAE_PRETRAIN_EPOCHS = 200
+
+def _gae_embed(data, p, seed):
+    """Unsupervised GAE reconstruction; returns frozen node embeddings."""
+    set_seed(seed)
+    gae = GAE(GAEEncoder(raw.num_node_features, int(p["hidden_dim"]),
+                         int(p["out_dim"]), float(p["dropout"]))).to(device)
+    opt = torch.optim.AdamW(gae.parameters(), lr=float(p["lr"]),
+                            weight_decay=float(p["weight_decay"]))
+    gae.train()
+    for _ in range(GAE_PRETRAIN_EPOCHS):
+        opt.zero_grad(set_to_none=True)
+        z = gae.encode(data.x, data.edge_index)
+        loss = gae.recon_loss(z, data.edge_index)
+        loss.backward(); opt.step()
+    gae.eval()
+    with torch.no_grad():
+        z = gae.encode(data.x, data.edge_index)
+    return z.detach()
+
+def _train_probe(z, data, train_mask, val_mask):
+    """Linear classifier on frozen embeddings, early-stopped on val accuracy."""
+    clf = nn.Linear(z.size(1), num_classes).to(device)
+    opt = torch.optim.AdamW(clf.parameters(), lr=1e-2, weight_decay=5e-4)
+    ce  = nn.CrossEntropyLoss()
+    train_mask, val_mask = train_mask.to(device), val_mask.to(device)
+    best_score, best_state, wait = -1e9, None, 0
+    for _ in range(200):
+        clf.train(); opt.zero_grad(set_to_none=True)
+        loss = ce(clf(z[train_mask]), data.y[train_mask]); loss.backward(); opt.step()
+        clf.eval()
+        with torch.no_grad():
+            va = accuracy_score(data.y[val_mask].cpu().numpy(),
+                                clf(z[val_mask]).argmax(1).cpu().numpy())
+        if va > best_score + 1e-12:
+            best_score, best_state, wait = va, deepcopy(clf.state_dict()), 0
+        else:
+            wait += 1
+            if wait >= 20: break
+    if best_state is not None: clf.load_state_dict(best_state)
+    return clf
+
+def _eval_probe(clf, z, data, mask):
+    clf.eval()
+    mask = mask.to(device)
+    with torch.no_grad():
+        pred = clf(z[mask]).argmax(1).cpu().numpy()
+        true = data.y[mask].cpu().numpy()
+    return compute_metrics(true, pred)
+
+def run_autoencoder_baseline(model_name="GraphAE"):
+    print(f"\n{'='*55}\n  {model_name} on {DATASET}\n{'='*55}")
+    params_path = PARAMS_DIR / f"{model_name}_best_params.json"
+    if SKIP_OPTUNA and params_path.exists():
+        print(f"[cache] loaded best params for {model_name}")
+        best_p = json.loads(params_path.read_text())
+    else:
+        set_seed(BASE_SEED)
+        tr0, sv0, _, _ = make_split(BASE_SEED)
+        tune_data = raw.clone().to(device); tune_data.train_mask = tr0.to(device)
+        print(f"\noptuna tuning {model_name} ({N_TRIALS} trials) ...")
+        def objective(trial):
+            p = suggest(trial, GAE_SPACE)
+            z = _gae_embed(tune_data, p, BASE_SEED)
+            return _eval_probe(_train_probe(z, tune_data, tr0, sv0), z, tune_data, sv0)["accuracy"]
+        study = optuna.create_study(direction="maximize",
+                                    sampler=optuna.samplers.TPESampler(seed=BASE_SEED))
+        study.optimize(objective, n_trials=N_TRIALS, show_progress_bar=True)
+        best_p = study.best_params
+        print(f"  best val acc: {study.best_value:.4f}  params: {best_p}")
+        params_path.write_text(json.dumps(best_p, indent=2))
+
+    val_accs, test_accs, val_f1s, test_f1s = [], [], [], []
+    for i in range(N_SPLITS):
+        split_seed = BASE_SEED + i
+        set_seed(split_seed)
+        tr, sv, pv, te = make_split(split_seed)
+        split_data = raw.clone().to(device); split_data.train_mask = tr.to(device)
+        z   = _gae_embed(split_data, best_p, split_seed)
+        clf = _train_probe(z, split_data, tr, sv)
+        mv  = _eval_probe(clf, z, split_data, sv)
+        mt  = _eval_probe(clf, z, split_data, te)
+        val_accs.append(mv["accuracy"]); val_f1s.append(mv["macro_f1"])
+        test_accs.append(mt["accuracy"]); test_f1s.append(mt["macro_f1"])
+        maybe_clear()
+        print(f"  split {i+1:02d}/{N_SPLITS} | val_acc={mv['accuracy']:.4f}  "
+              f"test_acc={mt['accuracy']:.4f}  test_f1={mt['macro_f1']:.4f}")
+
+    print(f"\n  {model_name} SUMMARY ({N_SPLITS} splits):")
+    print(f"    test_acc: {np.mean(test_accs):.4f} +/- {ci95(test_accs):.4f}")
+    print(f"    test_f1:  {np.mean(test_f1s):.4f} +/- {ci95(test_f1s):.4f}")
+    return {
+        "model": model_name, "dataset": DATASET, "n_splits": N_SPLITS,
+        "val_acc_mean":  np.mean(val_accs),  "val_acc_ci":  ci95(val_accs),
+        "test_acc_mean": np.mean(test_accs), "test_acc_ci": ci95(test_accs),
+        "test_f1_mean":  np.mean(test_f1s),  "test_f1_ci":  ci95(test_f1s),
+        "best_params": best_p,
+    }
+
+
+# ============================================================
 # main
 # ============================================================
 results = []
-results.append(run_baseline("GraphSAGE", build_sage, SAGE_SPACE))
-results.append(run_baseline("MLP",       build_mlp,  MLP_SPACE))
+results.append(run_baseline("GraphSAGE",  build_sage,       SAGE_SPACE))
+results.append(run_baseline("MLP",        build_mlp,        MLP_SPACE))
+results.append(run_baseline("GCN",        build_gcn,        GCN_SPACE))
+results.append(run_baseline("GAT",        build_gat,        GAT_SPACE))
+results.append(run_baseline("APPNP",      build_appnp,      APPNP_SPACE))
+results.append(run_baseline("GCNII",      build_gcnii,      GCNII_SPACE))
+results.append(run_baseline("GraphTrans", build_graphtrans, GRAPHTRANS_SPACE))
+results.append(run_autoencoder_baseline("GraphAE"))
 
 # save
 rows = []
