@@ -1,0 +1,102 @@
+\chapter{Introduction}
+
+Graph-structured data appears throughout machine learning, including citation networks,
+social networks, biological interaction networks, and knowledge graphs. In these settings,
+the predictive signal is not contained only in node features. It is also carried by the
+edges that determine which nodes exchange information. Graph Neural Networks (GNNs) exploit
+this relational structure through message passing, where each node updates its representation
+by aggregating information from its neighbours \cite{kipf2017gcn, hamilton2017graphsage}.
+This has made GNNs a standard approach for semi-supervised node classification.
+
+The benefit of message passing depends strongly on graph quality. If edges connect nodes
+with related labels or compatible features, aggregation can reinforce useful information.
+If the graph contains noisy, missing, or misleading edges, the same aggregation mechanism can
+propagate the wrong signal. This makes graph topology an important part of the learning
+pipeline rather than a fixed background object. Improving the graph can therefore be viewed
+as a complementary strategy to improving the GNN architecture itself.
+
+One structural property closely tied to GNN performance is \textit{homophily}, the tendency
+of connected nodes to share the same class. Standard message-passing GNNs often perform well
+on homophilous graphs because neighbours provide class-consistent information. On graphs
+with weak homophily, aggregation can mix incompatible signals and reduce performance
+\cite{zhu2020homophily}. Despite this relationship, many graph structure learning and graph
+editing methods do not treat homophily as an explicit reward or objective. Homophily is often
+left as an implicit side effect of optimizing a task loss or reconstruction objective.
+
+This thesis studies whether homophily can be used directly as a reward signal for graph
+editing. We propose \textbf{GraphHARE} (Graph Homophily-Aware Reinforcement Editing), a
+reinforcement learning framework that edits the topology of a citation graph while keeping a
+pre-trained GraphSAGE classifier fixed. The agent receives feedback from a held-out validation
+split and from the structural change in graph homophily. The intended reward has the form
+\begin{equation}
+    r_t =
+    \frac{\Delta F_1}{s_{F_1}}
+    + \beta \frac{\Delta h}{s_h},
+    \label{eq:reward}
+\end{equation}
+where $\Delta F_1$ is the change in validation macro-F1 between consecutive evaluation
+points, $\Delta h$ is the change in reward-safe homophily, $s_{F_1}$ and $s_h$ are fixed
+calibration scales, and $\beta \geq 0$ controls the weight of the homophily term. The frozen
+backbone design separates graph editing from classifier training, making the experiment a
+test of whether topology edits alone can improve a fixed GNN.
+
+A major part of this work became methodological. Early single-seed results appeared to show
+that GraphHARE improved Cora and that performance followed an inverted-U curve over $\beta$.
+A later audit found that those results were not valid. Two issues were responsible. First,
+the homophily reward used ground-truth labels on test-incident edges, leaking information
+from the test set into the reward for every $\beta > 0$ run. Second, the reported headline
+metric was the maximum validation macro-F1 over hundreds of noisy episodes, which selected
+the luckiest validation fluctuation rather than a stable learned improvement. After fixing
+the reward, evaluating test performance once after training, and reporting 10-seed paired
+confidence intervals, the apparent gains disappeared.
+
+The corrected experiments on Cora, CiteSeer, and PubMed show that GraphHARE matches the
+frozen GraphSAGE baseline, with no statistically significant test improvement for
+$\beta \in \{0, 0.5, 1.0\}$. This null result is important because the baselines themselves
+remain sound: GraphSAGE strongly outperforms an MLP on Cora, moderately outperforms it on
+CiteSeer, and only slightly outperforms it on PubMed. The graph is useful to the classifier,
+but the tested reward and policy do not find additional test-transferable improvements on
+these already homophilous citation graphs.
+
+To understand this outcome, we also perform an oracle headroom analysis. The analysis asks
+how much test performance could improve if graph edits were chosen with different amounts of
+information. A full oracle using true labels can produce large gains, showing that topology
+can matter in principle. However, when the editor is restricted to information available to
+the actual policy, the reachable gain is small on Cora and approximately zero on CiteSeer
+and PubMed. This suggests that the failure is not only an optimization problem. On these
+datasets, most of the useful editing signal is not available without label information that
+the protocol correctly forbids.
+
+\section*{Contributions}
+
+The main contributions of this thesis are:
+
+\begin{itemize}
+    \item A homophily-aware reinforcement learning formulation for graph editing, combining
+    validation macro-F1 and reward-safe homophily in a calibrated scalar reward.
+
+    \item A frozen-backbone graph editing protocol using GraphSAGE, designed to test whether
+    topology refinement alone can improve a fixed node classifier.
+
+    \item A corrected evaluation protocol that separates training, model selection, reward
+    evaluation, and test reporting, with 10-seed paired confidence intervals.
+
+    \item An empirical null result on Cora, CiteSeer, and PubMed showing that homophily-aware
+    RL graph editing does not significantly improve test performance over frozen GraphSAGE
+    on these homophilous citation benchmarks.
+
+    \item An oracle headroom analysis explaining the null result by separating theoretical
+    topology headroom from prediction-reachable editing headroom.
+
+    \item An expanded comparison harness including MLP, GraphSAGE, GCN, GAT, APPNP, GCNII,
+    GraphTrans, and a graph autoencoder baseline.
+\end{itemize}
+
+\section*{Thesis Outline}
+
+Chapter~2 reviews graph neural networks, homophily, graph autoencoders, reinforcement
+learning for graph problems, and graph topology optimisation. Chapter~3 defines the
+GraphHARE environment, reward function, policy network, and corrected evaluation protocol.
+Chapter~4 presents the experimental results, baseline comparisons, and oracle headroom
+analysis. Chapter~5 concludes with lessons from the null result and directions for future
+work on graph editing.
