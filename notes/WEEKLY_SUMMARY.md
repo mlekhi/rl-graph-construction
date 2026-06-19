@@ -5,20 +5,20 @@ _June 11 – June 19, 2026_
 
 ## Headline: last week's "gains" were measurement artifacts
 
-A deep review (Prof. AlMahamid, independently corroborated on our side) found two
-methodological bugs that invalidated every RL result so far. After fixing them and
-running an honest protocol, **GraphHARE matches the frozen-SAGE baseline at every β
-on all three datasets — no significant gain, no inverted-U.** The β=1.1 peak and the
-+1.57pp Cora result from last week were noise, not signal.
+A pipeline audit found two methodological bugs that invalidated every RL result so
+far. After fixing them and running an honest protocol, **GraphHARE matches the
+frozen-SAGE baseline at every β on all three datasets — no significant gain, no
+inverted-U.** The β=1.1 peak and the +1.57pp Cora result from last week were noise,
+not signal.
 
-This is a clean negative result on homophilous graphs, not a dead end — see headroom
-analysis and next steps below.
+This is a clean negative result on homophilous citation graphs. The current focus is
+to finish the comparison table and move into writing.
 
 ---
 
 ## What Went Wrong (and is now fixed)
 
-| Bug | Effect | Fix (branch `fadi/review-fixes`, merged) |
+| Bug | Effect | Fix |
 |---|---|---|
 | **Reward leak** | homophily reward used ground-truth labels on test-incident edges (~1/3), leaking test info on every β > 0 run | reward homophily restricted to non-test edges; full-edge homophily kept for *reporting only* |
 | **Noise-max metric** | `best_macro_f1` = max over ~500 noisy policy_val evals → selection-on-noise; manufactured the β peak/curve | honest `mean_last50` metric; **test set evaluated once** after training |
@@ -60,7 +60,7 @@ ceiling on test-F1 from graph editing under different information:
 The graph *can* matter (~11–16pp under a perfect oracle), but almost all of it is
 locked behind true labels the method cannot use. With only the frozen SAGE's own
 predictions, reachable test gain is ~0.9pp on Cora and ~0 elsewhere. The policy
-correctly converges to "do nothing" because there is little prediction-reachable
+converges near the original graph because there is little prediction-reachable
 signal on these already-homophilous graphs.
 
 ---
@@ -68,8 +68,8 @@ signal on these already-homophilous graphs.
 ## Comparison Baselines (for the paper table)
 
 Added five GNNs + a graph-autoencoder to the baseline harness, same Optuna +
-multi-split protocol as SAGE/MLP. Smoke-tested locally (all run, correct shapes);
-full Optuna + 10-split runs pending on gpu2.
+multi-split protocol as SAGE/MLP. Smoke-tested locally (all run, correct shapes).
+Full Optuna + 10-split runs are now running on gpu2.
 
 - **GCN, GAT, APPNP, GCNII, GraphTrans** (PyG node-classification layers)
 - **GraphAE** (GAE pretrain → linear probe on embeddings)
@@ -81,18 +81,17 @@ full Optuna + 10-split runs pending on gpu2.
 
 ## Open Questions for Next Meeting
 
-1. Heterophilic pivot — homophilous citation graphs have ~0 prediction-reachable
-   headroom. Heterophilic graphs (Texas, Wisconsin, Chameleon, Squirrel) have genuine
-   structure to fix. Re-target the method there?
-2. How to frame the homophilous null result — standalone analysis contribution, or
-   motivation for the heterophilic work?
-3. Walk through the new reward path in `graph_env.py` (Prof. AlMahamid requested).
+1. How to frame the homophilous null result: negative result, diagnostic result, or
+   motivation for revising the reward/policy design?
+2. Whether the paper should emphasize the protocol correction + oracle headroom
+   analysis as the main finding for this phase.
+3. Be ready to walk through the new reward path in `graph_env.py`.
 
 ---
 
 ## Next Steps
 
-1. Run the extended baseline table (GCN/GAT/APPNP/GCNII/GraphTrans/GraphAE) on all 3 datasets, gpu2.
-2. Heterophilic headroom check — train a frozen SAGE on one heterophilic dataset and run the same oracle decomposition to see if real reachable headroom exists.
-3. Begin intro + literature review (per Prof. AlMahamid).
-4. Pull GraphRARE's reported numbers; confirm dataset coverage.
+1. Finish extended baseline table (GCN/GAT/APPNP/GCNII/GraphTrans/GraphAE) on all 3 datasets, gpu2.
+2. Pull/scp baseline summaries and assemble the comparison table.
+3. Pull GraphRARE's reported numbers; confirm dataset coverage.
+4. Begin writing: intro + related work first.
